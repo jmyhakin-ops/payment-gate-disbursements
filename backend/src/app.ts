@@ -93,8 +93,22 @@ app.use(`${prefix}/wallets`, walletsRoutes);
 app.use(`${prefix}/audit`, auditRoutes);
 app.use(`${prefix}/reports`, reportsRoutes);
 
+// ─── Serve React Frontend (production) ───────────────────────────────────────
+// In production Vercel build, the React app is built to /frontend/dist
+// Express serves those static files and falls back to index.html for SPA routing
+const frontendDist = path.resolve(process.cwd(), 'frontend', 'dist');
+app.use(express.static(frontendDist, { maxAge: '1d' }));
+// All non-API routes → serve React's index.html (client-side routing)
+app.get('*', (_req, res, next) => {
+  const indexFile = path.join(frontendDist, 'index.html');
+  res.sendFile(indexFile, (err) => {
+    if (err) next(); // fallback if dist not built yet (dev mode)
+  });
+});
+
 // ─── 404 & Error Handler ──────────────────────────────────────────────────────
 app.use(notFound);
 app.use(errorHandler);
 
 export default app;
+

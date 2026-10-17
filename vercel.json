@@ -1,18 +1,16 @@
 {
   "version": 2,
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
   "builds": [
     {
       "src": "backend/src/server.ts",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["backend/prisma/**"]
-      }
-    },
-    {
-      "src": "frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "frontend/dist"
+        "includeFiles": [
+          "frontend/dist/**",
+          "backend/prisma/schema.prisma"
+        ]
       }
     }
   ],
@@ -23,10 +21,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "frontend/dist/$1"
+      "dest": "backend/src/server.ts"
     }
-  ],
-  "env": {
-    "NODE_ENV": "production"
-  }
+  ]
 }
