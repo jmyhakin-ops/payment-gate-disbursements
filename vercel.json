@@ -1,27 +1,20 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "installCommand": "npm install",
-  "builds": [
-    {
-      "src": "backend/src/server.ts",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "frontend/dist/**",
-          "backend/prisma/schema.prisma"
-        ]
-      }
+  "framework": null,
+  "buildCommand": "cd frontend && npm install --legacy-peer-deps && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "cd backend && npm install --legacy-peer-deps",
+  "functions": {
+    "api/index.ts": {
+      "runtime": "@vercel/node",
+      "memory": 1024,
+      "maxDuration": 30,
+      "includeFiles": "backend/**"
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "backend/src/server.ts"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "backend/src/server.ts"
-    }
+  },
+  "rewrites": [
+    { "source": "/api/v1/:path*", "destination": "/api/index.ts" },
+    { "source": "/health",         "destination": "/api/index.ts" },
+    { "source": "/((?!api).*)",    "destination": "/index.html" }
   ]
 }

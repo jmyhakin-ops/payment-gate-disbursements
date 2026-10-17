@@ -1,17 +1,11 @@
 {
   "name": "kenyapay-platform",
   "version": "1.0.0",
-  "description": "KenyaPay Multi-Rail Payment Platform - Combined Monorepo",
   "private": true,
   "scripts": {
-    "build": "npm run build:frontend && npm run build:backend",
-    "build:frontend": "cd frontend && npm install --legacy-peer-deps && npm run build",
-    "build:backend": "cd backend && npm install --legacy-peer-deps && npm run build",
+    "build": "cd frontend && npm install --legacy-peer-deps && npm run build",
     "start": "node backend/dist/server.js",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:backend": "cd backend && npm run dev"
+    "dev": "cd backend && npm run dev"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+  "engines": { "node": ">=18.0.0" }
 }
