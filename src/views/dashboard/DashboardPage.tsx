@@ -114,7 +114,7 @@ export default function DashboardPage() {
       {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Payment Rail Distribution */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
           <h3 className="font-semibold text-gray-900 mb-4">Payment Rails (This Month)</h3>
           {summary?.byRail?.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
@@ -146,7 +146,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Status Breakdown */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
           <h3 className="font-semibold text-gray-900 mb-4">Transaction Status</h3>
           {summary?.byStatus?.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
@@ -164,7 +164,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Wallets */}
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900">Wallets</h3>
             <Link to="/wallets" className="text-blue-600 text-xs hover:underline flex items-center gap-1">View all <ArrowRight className="w-3 h-3" /></Link>
@@ -201,7 +201,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent Transactions */}
-      <div className="bg-white rounded-xl border border-gray-200">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
           <h3 className="font-semibold text-gray-900">Recent Transactions</h3>
           <Link to="/payments" className="text-blue-600 text-sm hover:underline flex items-center gap-1">View all <ArrowRight className="w-3 h-3" /></Link>
@@ -243,31 +243,42 @@ function KPICard({ title, value, sub, icon, color, trend, loading }: {
   title: string; value: string; sub?: string; icon: React.ReactNode;
   color: 'blue' | 'green' | 'purple' | 'amber' | 'gray'; trend?: number; loading?: boolean;
 }) {
-  const colors = {
-    blue: 'bg-blue-50 text-blue-600', green: 'bg-green-50 text-green-600',
-    purple: 'bg-purple-50 text-purple-600', amber: 'bg-amber-50 text-amber-600',
-    gray: 'bg-gray-50 text-gray-500',
+  const gradients = {
+    blue:   'from-blue-500 to-indigo-600',
+    green:  'from-emerald-500 to-green-600',
+    purple: 'from-purple-500 to-violet-600',
+    amber:  'from-amber-500 to-orange-500',
+    gray:   'from-gray-400 to-gray-500',
+  };
+  const shadows = {
+    blue:   'shadow-blue-200',
+    green:  'shadow-emerald-200',
+    purple: 'shadow-purple-200',
+    amber:  'shadow-amber-200',
+    gray:   'shadow-gray-200',
   };
   return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <div className="flex items-start justify-between mb-3">
-        <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', colors[color])}>{icon}</div>
+    <div className="bg-white rounded-2xl border border-gray-200 p-5 card-hover shadow-sm">
+      <div className="flex items-start justify-between mb-4">
+        <div className={cn('w-11 h-11 rounded-xl bg-gradient-to-br flex items-center justify-center text-white shadow-lg', gradients[color], shadows[color])}>
+          {icon}
+        </div>
         {trend !== undefined && (
-          <div className={cn('flex items-center gap-1 text-xs font-medium', trend >= 0 ? 'text-green-600' : 'text-red-600')}>
+          <div className={cn('flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full', trend >= 0 ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500')}>
             {trend >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
             {Math.abs(trend)}%
           </div>
         )}
       </div>
       {loading ? (
-        <div className="space-y-2"><div className="h-6 bg-gray-100 rounded shimmer" /><div className="h-4 bg-gray-50 rounded shimmer w-3/4" /></div>
+        <div className="space-y-2"><div className="h-7 bg-gray-100 rounded-lg shimmer" /><div className="h-4 bg-gray-50 rounded shimmer w-3/4" /></div>
       ) : (
         <>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-          {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+          <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
+          {sub && <p className="text-xs text-gray-400 mt-1 leading-relaxed">{sub}</p>}
         </>
       )}
-      <p className="text-xs font-medium text-gray-500 mt-2">{title}</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mt-3">{title}</p>
     </div>
   );
 }
