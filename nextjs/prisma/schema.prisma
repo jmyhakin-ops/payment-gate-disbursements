@@ -1,0 +1,633 @@
+// ─────────────────────────────────────────────────────────────────────────────
+//  PRISMA SCHEMA — KENYAPAY MULTI-RAIL PAYMENT PLATFORM
+//  Full database schema: all tables, relations, enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN      // Platform owner (can manage everything)
+  ORG_ADMIN        // Organisation administrator
+  FINANCE_MANAGER  // Can initiate payments, view reports
+  MAKER            // Initiates transactions (requires checker + director approval)
+  CHECKER          // Reviews and approves maker transactions
+  DIRECTOR         // Final approver before funds leave
+  VIEWER           // Read-only access
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING_VERIFICATION
+}
+
+enum OrgStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum SystemActivationStatus {
+  NOT_CONFIGURED
+  CONFIGURED
+  ACTIVE
+  MAINTENANCE
+}
+
+enum PaymentRail {
+  MPESA_B2C        // M-Pesa Business to Customer
+  MPESA_B2B_PAYBILL // M-Pesa B2B Paybill
+  MPESA_B2B_TILL   // M-Pesa B2B Buy Goods Till
+  PESALINK         // Interbank PesaLink transfer
+  RTGS             // Real Time Gross Settlement
+  EQUITY_JENGA     // Equity Bank Jenga API
+  KCB_OPEN_BANKING // KCB Open Banking
+}
+
+enum TransactionStatus {
+  DRAFT
+  PENDING_CHECKER   // Waiting for checker approval
+  CHECKER_APPROVED
+  CHECKER_REJECTED
+  PENDING_DIRECTOR  // Waiting for director approval
+  DIRECTOR_APPROVED
+  DIRECTOR_REJECTED
+  PROCESSING        // Being sent to payment rail
+  COMPLETED
+  FAILED
+  REVERSED
+  CANCELLED
+}
+
+enum TransactionType {
+  DEBIT
+  CREDIT
+}
+
+enum ApprovalAction {
+  APPROVED
+  REJECTED
+  RETURNED     // Sent back to maker for edits
+}
+
+enum WalletType {
+  MPESA
+  BANK
+  VIRTUAL      // Internal ledger wallet
+}
+
+enum NotificationType {
+  EMAIL
+  SMS
+  PUSH
+  IN_APP
+}
+
+enum WebhookEventType {
+  PAYMENT_COMPLETED
+  PAYMENT_FAILED
+  PAYMENT_REVERSED
+  APPROVAL_REQUIRED
+  APPROVAL_DONE
+  WALLET_FUNDED
+  RECONCILIATION_DONE
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  CREATE
+  UPDATE
+  DELETE
+  APPROVE
+  REJECT
+  INITIATE_PAYMENT
+  CANCEL_PAYMENT
+  SETTINGS_CHANGE
+  API_CREDENTIAL_CHANGE
+  USER_INVITE
+  USER_SUSPEND
+  DIRECTOR_APPROVAL
+}
+
+enum ApiCredentialType {
+  MPESA_DARAJA
+  PESALINK
+  EQUITY_JENGA
+  KCB_OPEN_BANKING
+  AFRICAS_TALKING
+  SMTP_EMAIL
+}
+
+// ─── ORGANIZATIONS / TENANTS ─────────────────────────────────────────────────
+
+model Organization {
+  id                    String               @id @default(uuid())
+  name                  String
+  legalName             String
+  registrationNumber    String               @unique // CAK/KRA registration
+  kraPin                String               @unique
+  industry              String
+  address               String
+  city                  String
+  country               String               @default("Kenya")
+  phone                 String
+  email                 String               @unique
+  website               String?
+  logoUrl               String?
+  status                OrgStatus            @default(PENDING_APPROVAL)
+  activationCode        String?              @unique
+  activatedAt           DateTime?
+  activatedByUserId     String?
+  requiresDirectorApproval Boolean           @default(true)
+  makerCheckerEnabled   Boolean              @default(true)
+  minApprovalAmount     Float                @default(0)      // KES — always require approval above this
+  maxTransactionLimit   Float                @default(5000000) // KES per transaction
+  dailyTransactionLimit Float                @default(10000000) // KES per day
+  monthlyTransactionLimit Float              @default(100000000) // KES per month
+  allowedRails          PaymentRail[]        @default([MPESA_B2C])
+  directorCount         Int                  @default(2)     // Min directors needed to approve
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+
+  // Relations
+  users                 User[]
+  wallets               Wallet[]
+  transactions          Transaction[]
+  apiCredentials        ApiCredential[]
+  approvalWorkflows     ApprovalWorkflow[]
+  webhooks              WebhookEndpoint[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+  reports               Report[]
+  systemSettings        SystemSetting[]
+  directors             OrganizationDirector[]
+  bankAccounts          BankAccount[]
+  reconciliations       Reconciliation[]
+
+  @@map("organizations")
+}
+
+// ─── DIRECTORS ────────────────────────────────────────────────────────────────
+
+model OrganizationDirector {
+  id             String       @id @default(uuid())
+  organizationId String
+  userId         String
+  name           String
+  email          String
+  phone          String
+  nationalId     String
+  signatureUrl   String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@map("organization_directors")
+}
+
+// ─── USERS ───────────────────────────────────────────────────────────────────
+
+model User {
+  id                   String               @id @default(uuid())
+  organizationId       String?
+  firstName            String
+  lastName             String
+  email                String               @unique
+  phone                String?
+  passwordHash         String
+  role                 UserRole             @default(MAKER)
+  status               UserStatus           @default(PENDING_VERIFICATION)
+  avatarUrl            String?
+  department           String?
+  jobTitle             String?
+  nationalId           String?
+  twoFactorEnabled     Boolean              @default(false)
+  twoFactorSecret      String?
+  twoFactorQrCode      String?
+  emailVerified        Boolean              @default(false)
+  emailVerificationToken String?
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
+  lastLoginAt          DateTime?
+  lastLoginIp          String?
+  lastPasswordChange   DateTime?
+  loginAttempts        Int                  @default(0)
+  lockoutUntil         DateTime?
+  refreshTokens        String[]
+  preferences          Json?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  // Relations
+  organization         Organization?        @relation(fields: [organizationId], references: [id])
+  directorProfile      OrganizationDirector[]
+  initiatedTransactions Transaction[]       @relation("TransactionMaker")
+  checkerApprovals     ApprovalWorkflow[]   @relation("ApprovalChecker")
+  directorApprovals    DirectorApproval[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+  invitations          UserInvitation[]     @relation("InvitedBy")
+  receivedInvitations  UserInvitation[]     @relation("InvitedUser")
+
+  @@map("users")
+}
+
+// ─── USER INVITATIONS ─────────────────────────────────────────────────────────
+
+model UserInvitation {
+  id             String     @id @default(uuid())
+  organizationId String
+  invitedById    String
+  email          String
+  role           UserRole
+  token          String     @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  invitedUserId  String?
+  createdAt      DateTime   @default(now())
+
+  invitedBy      User       @relation("InvitedBy", fields: [invitedById], references: [id])
+  invitedUser    User?      @relation("InvitedUser", fields: [invitedUserId], references: [id])
+
+  @@map("user_invitations")
+}
+
+// ─── SYSTEM SETTINGS ─────────────────────────────────────────────────────────
+
+model SystemSetting {
+  id             String     @id @default(uuid())
+  organizationId String?
+  key            String
+  value          String
+  isEncrypted    Boolean    @default(false)
+  description    String?
+  category       String     @default("general")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
+  @@unique([organizationId, key])
+  @@map("system_settings")
+}
+
+// ─── API CREDENTIALS (Encrypted) ─────────────────────────────────────────────
+
+model ApiCredential {
+  id              String            @id @default(uuid())
+  organizationId  String
+  type            ApiCredentialType
+  name            String            // e.g. "M-Pesa Production"
+  environment     String            @default("sandbox") // sandbox | production
+  isActive        Boolean           @default(false)
+  credentials     String            // AES-256 encrypted JSON blob
+  webhookSecret   String?
+  lastTestedAt    DateTime?
+  lastTestStatus  String?
+  lastTestMessage String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization    Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, type, environment])
+  @@map("api_credentials")
+}
+
+// ─── WALLETS ─────────────────────────────────────────────────────────────────
+
+model Wallet {
+  id              String       @id @default(uuid())
+  organizationId  String
+  type            WalletType
+  name            String
+  currency        String       @default("KES")
+  balance         Float        @default(0)
+  reservedBalance Float        @default(0)   // locked for pending transactions
+  accountNumber   String?      // M-Pesa shortcode or bank account number
+  bankName        String?
+  bankCode        String?
+  branchCode      String?
+  isDefault       Boolean      @default(false)
+  isActive        Boolean      @default(true)
+  lastSyncedAt    DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  ledgerEntries   LedgerEntry[]
+
+  @@map("wallets")
+}
+
+// ─── BANK ACCOUNTS (Beneficiaries / Own Accounts) ────────────────────────────
+
+model BankAccount {
+  id              String       @id @default(uuid())
+  organizationId  String
+  accountName     String
+  accountNumber   String
+  bankName        String
+  bankCode        String       // Interbank code
+  branchCode      String?
+  swiftCode       String?
+  pesaLinkEnabled Boolean      @default(true)
+  rtgsEnabled     Boolean      @default(false)
+  isVerified      Boolean      @default(false)
+  verifiedAt      DateTime?
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+
+  @@map("bank_accounts")
+}
+
+// ─── TRANSACTIONS ─────────────────────────────────────────────────────────────
+
+model Transaction {
+  id                   String              @id @default(uuid())
+  organizationId       String
+  walletId             String
+  bankAccountId        String?
+  makerId              String
+  reference            String              @unique // Internal reference e.g. TXN-20240101-XXXXX
+  externalReference    String?             // Reference from payment rail
+  rail                 PaymentRail
+  type                 TransactionType
+  status               TransactionStatus   @default(DRAFT)
+  currency             String              @default("KES")
+  amount               Float
+  charges              Float               @default(0)
+  netAmount            Float               // amount - charges
+  description          String
+  narration            String?
+
+  // Recipient details
+  recipientName        String
+  recipientPhone       String?
+  recipientEmail       String?
+  recipientAccountNo   String?             // Paybill/Till/Bank account number
+  recipientBankCode    String?
+  recipientBankName    String?
+  recipientBranchCode  String?
+
+  // M-Pesa specific
+  mpesaConversationId  String?
+  mpesaOriginatorId    String?
+  mpesaReceiptNumber   String?
+
+  // PesaLink / RTGS specific
+  pesaLinkRef          String?
+  rtgsRef              String?
+
+  // Metadata
+  metadata             Json?
+  failureReason        String?
+  retryCount           Int                 @default(0)
+  maxRetries           Int                 @default(3)
+  processedAt          DateTime?
+  completedAt          DateTime?
+  reversedAt           DateTime?
+  scheduledAt          DateTime?           // For scheduled payments
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  // Relations
+  organization         Organization        @relation(fields: [organizationId], references: [id])
+  wallet               Wallet              @relation(fields: [walletId], references: [id])
+  bankAccount          BankAccount?        @relation(fields: [bankAccountId], references: [id])
+  maker                User                @relation("TransactionMaker", fields: [makerId], references: [id])
+  approvalWorkflow     ApprovalWorkflow?
+  directorApprovals    DirectorApproval[]
+  ledgerEntries        LedgerEntry[]
+  webhookEvents        WebhookEvent[]
+  notifications        Notification[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, rail])
+  @@index([organizationId, createdAt])
+  @@index([reference])
+  @@map("transactions")
+}
+
+// ─── APPROVAL WORKFLOW (Maker-Checker) ───────────────────────────────────────
+
+model ApprovalWorkflow {
+  id              String         @id @default(uuid())
+  transactionId   String         @unique
+  organizationId  String
+  checkerId       String?
+  checkerAction   ApprovalAction?
+  checkerNote     String?
+  checkerAt       DateTime?
+  requiresDirector Boolean       @default(true)
+  minDirectors    Int            @default(1)    // Minimum directors needed
+  directorsApproved Int          @default(0)
+  completedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  transaction     Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  organization    Organization   @relation(fields: [organizationId], references: [id])
+  checker         User?          @relation("ApprovalChecker", fields: [checkerId], references: [id])
+  directorApprovals DirectorApproval[]
+
+  @@map("approval_workflows")
+}
+
+// ─── DIRECTOR APPROVALS ───────────────────────────────────────────────────────
+
+model DirectorApproval {
+  id                 String         @id @default(uuid())
+  transactionId      String
+  approvalWorkflowId String
+  directorId         String
+  action             ApprovalAction
+  note               String?
+  ipAddress          String?
+  userAgent          String?
+  signatureData      String?
+  approvedAt         DateTime       @default(now())
+
+  transaction        Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  approvalWorkflow   ApprovalWorkflow @relation(fields: [approvalWorkflowId], references: [id])
+  director           User           @relation(fields: [directorId], references: [id])
+
+  @@map("director_approvals")
+}
+
+// ─── LEDGER ENTRIES (Double-Entry Bookkeeping) ───────────────────────────────
+
+model LedgerEntry {
+  id              String          @id @default(uuid())
+  walletId        String
+  transactionId   String
+  type            TransactionType
+  amount          Float
+  balanceBefore   Float
+  balanceAfter    Float
+  description     String
+  reference       String
+  currency        String          @default("KES")
+  createdAt       DateTime        @default(now())
+
+  wallet          Wallet          @relation(fields: [walletId], references: [id])
+  transaction     Transaction     @relation(fields: [transactionId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@map("ledger_entries")
+}
+
+// ─── RECONCILIATION ───────────────────────────────────────────────────────────
+
+model Reconciliation {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  rail               PaymentRail
+  periodStart        DateTime
+  periodEnd          DateTime
+  totalTransactions  Int
+  totalAmount        Float
+  successCount       Int
+  failedCount        Int
+  pendingCount       Int
+  discrepancies      Json?        // Any mismatches found
+  status             String       @default("completed")
+  runAt              DateTime     @default(now())
+
+  organization       Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("reconciliations")
+}
+
+// ─── WEBHOOK ENDPOINTS ────────────────────────────────────────────────────────
+
+model WebhookEndpoint {
+  id              String           @id @default(uuid())
+  organizationId  String
+  name            String
+  url             String
+  secret          String
+  events          WebhookEventType[]
+  isActive        Boolean          @default(true)
+  retryCount      Int              @default(3)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  events_sent     WebhookEvent[]
+
+  @@map("webhook_endpoints")
+}
+
+// ─── WEBHOOK EVENTS ───────────────────────────────────────────────────────────
+
+model WebhookEvent {
+  id               String           @id @default(uuid())
+  endpointId       String
+  transactionId    String?
+  event            WebhookEventType
+  payload          Json
+  statusCode       Int?
+  responseBody     String?
+  delivered        Boolean          @default(false)
+  attempts         Int              @default(0)
+  lastAttemptAt    DateTime?
+  deliveredAt      DateTime?
+  createdAt        DateTime         @default(now())
+
+  endpoint         WebhookEndpoint  @relation(fields: [endpointId], references: [id])
+  transaction      Transaction?     @relation(fields: [transactionId], references: [id])
+
+  @@map("webhook_events")
+}
+
+// ─── AUDIT LOGS ──────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String      @id @default(uuid())
+  organizationId String?
+  userId         String?
+  action         AuditAction
+  resource       String?     // Table/entity name
+  resourceId     String?     // ID of the entity
+  oldValues      Json?
+  newValues      Json?
+  ipAddress      String?
+  userAgent      String?
+  description    String
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  user           User?         @relation(fields: [userId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+
+model Notification {
+  id             String           @id @default(uuid())
+  organizationId String?
+  userId         String?
+  transactionId  String?
+  type           NotificationType
+  channel        String           // email | sms | push | in_app
+  recipient      String           // email address or phone
+  subject        String?
+  message        String
+  isRead         Boolean          @default(false)
+  isSent         Boolean          @default(false)
+  sentAt         DateTime?
+  readAt         DateTime?
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+
+  organization   Organization?    @relation(fields: [organizationId], references: [id])
+  user           User?            @relation(fields: [userId], references: [id])
+  transaction    Transaction?     @relation(fields: [transactionId], references: [id])
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── REPORTS ─────────────────────────────────────────────────────────────────
+
+model Report {
+  id             String     @id @default(uuid())
+  organizationId String
+  name           String
+  type           String     // daily | weekly | monthly | custom | reconciliation
+  parameters     Json?
+  fileUrl        String?
+  generatedAt    DateTime   @default(now())
+  requestedById  String?
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+
+  @@map("reports")
+}
