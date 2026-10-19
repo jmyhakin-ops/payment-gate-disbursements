@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "npm --prefix frontend install --legacy-peer-deps && npm --prefix frontend run build",
+    "build": "node build.js",
     "start:backend": "node backend/dist/server.js"
   },
   "dependencies": {
