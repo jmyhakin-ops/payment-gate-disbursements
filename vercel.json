@@ -1,6 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
+  "framework": null,
+  "buildCommand": "npx prisma generate --schema=backend/prisma/schema.prisma && cd frontend && npm install --legacy-peer-deps && npm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     { "source": "/api/v1/:path*", "destination": "/api/index.ts" },
