@@ -27,8 +27,7 @@ export async function connectRedis(): Promise<void> {
   try {
     await client.connect();
   } catch (err) {
-    console.error('❌ Redis connection failed:', err);
-    process.exit(1);
+    console.warn('⚠️  Redis connection unavailable, continuing without cache:', (err as Error).message);
   }
 }
 
