@@ -4,6 +4,9 @@ export default {
   content: ['./index.html', './src/**/*.{ts,tsx,js,jsx}'],
   theme: {
     container: { center: true, padding: '2rem', screens: { '2xl': '1400px' } },
+    fontFamily: {
+      sans: ['Outfit', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+    },
     extend: {
       colors: {
         border: 'hsl(var(--border))',

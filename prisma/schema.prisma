@@ -176,6 +176,7 @@ model Organization {
   directors             OrganizationDirector[]
   bankAccounts          BankAccount[]
   reconciliations       Reconciliation[]
+  suppliers             Supplier[]
 
   @@map("organizations")
 }
@@ -630,4 +631,49 @@ model Report {
   organization   Organization @relation(fields: [organizationId], references: [id])
 
   @@map("reports")
+}
+
+
+// ─── SUPPLIERS ────────────────────────────────────────────────────────────────
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+model Supplier {
+  id                String         @id @default(uuid())
+  organizationId    String
+  name              String
+  type              String         @default("MPESA_B2C")
+  category          String?
+  phone             String?
+  paybillNumber     String?
+  tillNumber        String?
+  accountRef        String?
+  bankCode          String?
+  bankName          String?
+  accountNumber     String?
+  accountName       String?
+  branchName        String?
+  email             String?
+  kraPin            String?
+  contactPerson     String?
+  contactPhone      String?
+  notes             String?
+  status            SupplierStatus @default(ACTIVE)
+  totalPaid         Decimal        @default(0) @db.Decimal(20, 4)
+  transactionCount  Int            @default(0)
+  lastPaymentAt     DateTime?
+  lastPaymentAmount Decimal?       @db.Decimal(20, 4)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  organization      Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([organizationId, name])
+  @@index([organizationId, type])
+  @@map("suppliers")
 }
