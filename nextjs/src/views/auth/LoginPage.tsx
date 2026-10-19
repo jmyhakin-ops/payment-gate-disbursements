@@ -37,9 +37,8 @@ export default function LoginPage() {
         setPending2FAUserId(res.data.userId);
         return;
       }
-      // Fetch full profile
-      const meRes = await authApi.me();
-      setAuth(data.accessToken, data.refreshToken, meRes.data.data);
+      // Use the user object returned from login directly — no need to call me()
+      setAuth(data.accessToken, data.refreshToken, data.user);
       navigate(from, { replace: true });
     },
     onError: (err: unknown) => setError(extractApiError(err)),
@@ -49,12 +48,13 @@ export default function LoginPage() {
     mutationFn: (token: string) => authApi.verify2fa(pending2FAUserId, token),
     onSuccess: async (res) => {
       const { data } = res.data;
-      const meRes = await authApi.me();
-      setAuth(data.accessToken, data.refreshToken, meRes.data.data);
+      // Use the user object returned from 2FA verify directly
+      setAuth(data.accessToken, data.refreshToken, data.user);
       navigate(from, { replace: true });
     },
     onError: (err: unknown) => setError(extractApiError(err)),
   });
+
 
   const onSubmit = (data: FormData) => {
     setError('');
