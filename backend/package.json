@@ -17,7 +17,6 @@
     "@prisma/client": "^5.10.0",
     "axios": "^1.6.7",
     "bcryptjs": "^2.4.3",
-    "bullmq": "^5.1.6",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
     "crypto-js": "^4.2.0",
