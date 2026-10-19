@@ -1,7 +1,7 @@
 {
   "version": 2,
   "framework": null,
-  "buildCommand": "npx prisma generate --schema=backend/prisma/schema.prisma && cd frontend && npm install --legacy-peer-deps && npm run build",
+  "buildCommand": "DATABASE_URL=\"${DATABASE_URL:-postgresql://postgres:postgres@localhost:5432/postgres}\" DIRECT_URL=\"${DIRECT_URL:-postgresql://postgres:postgres@localhost:5432/postgres}\" npx prisma generate --schema=backend/prisma/schema.prisma && cd frontend && npm install --legacy-peer-deps && npm run build",
   "outputDirectory": "frontend/dist",
   "rewrites": [
     { "source": "/api/v1/:path*", "destination": "/api/index.ts" },
