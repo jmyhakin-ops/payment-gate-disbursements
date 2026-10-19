@@ -99,6 +99,16 @@ export const suppliersApi = {
   update: (id: string, body: any) => apiClient.patch(`/suppliers/${id}`, body),
 };
 
+// ─── Settings / Payment Gateway Config ───────────────────────────────────────
+export const settingsApi = {
+  /** Returns which payment rails are active (configured) in the web app gateway.
+   *  Used by mobile POS to know which rails to show.
+   *  GET /settings?section=configured-rails
+   */
+  configuredRails: () =>
+    apiClient.get('/settings', { params: { section: 'configured-rails' } }),
+};
+
 // ─── Notifications ────────────────────────────────────────────────────────────
 export const notificationsApi = {
   list: (params?: Record<string, any>) => apiClient.get('/users/notifications', { params }),

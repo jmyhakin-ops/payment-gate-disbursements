@@ -7,16 +7,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { paymentsApi, walletsApi, suppliersApi, apiClient } from '../services/api';
+import { Ionicons } from '@expo/vector-icons';
+import { paymentsApi, walletsApi, suppliersApi, settingsApi } from '../services/api';
 
-const RAILS = [
-  { value: 'MPESA_B2C', label: 'M-Pesa B2C', emoji: '📱', color: '#10b981' },
-  { value: 'MPESA_B2B_PAYBILL', label: 'Paybill', emoji: '🏦', color: '#10b981' },
-  { value: 'MPESA_B2B_TILL', label: 'Buy Goods', emoji: '🛒', color: '#10b981' },
-  { value: 'PESALINK', label: 'PesaLink', emoji: '🏛️', color: '#3b82f6' },
-  { value: 'RTGS', label: 'RTGS/EFT', emoji: '💸', color: '#8b5cf6' },
-  { value: 'EQUITY_JENGA', label: 'Equity', emoji: '⚡', color: '#ef4444' },
-  { value: 'KCB_OPEN_BANKING', label: 'KCB', emoji: '🔑', color: '#f59e0b' },
+/** All supported payment rails with display metadata */
+const ALL_RAILS = [
+  { value: 'MPESA_B2C',         label: 'M-Pesa B2C',   subtitle: 'Send to M-Pesa wallets', icon: 'phone-portrait-outline', color: '#10b981', bg: '#ecfdf5' },
+  { value: 'MPESA_B2B_PAYBILL', label: 'M-Pesa Paybill', subtitle: 'Pay to Paybill number', icon: 'business-outline',       color: '#10b981', bg: '#ecfdf5' },
+  { value: 'MPESA_B2B_TILL',    label: 'Buy Goods Till', subtitle: 'Pay via till number',    icon: 'cart-outline',           color: '#10b981', bg: '#ecfdf5' },
+  { value: 'PESALINK',          label: 'PesaLink',      subtitle: 'Instant bank transfer',   icon: 'swap-horizontal-outline', color: '#3b82f6', bg: '#eff6ff' },
+  { value: 'RTGS',              label: 'RTGS / EFT',    subtitle: 'High-value bank transfer', icon: 'library-outline',        color: '#8b5cf6', bg: '#f5f3ff' },
+  { value: 'EQUITY_JENGA',      label: 'Equity Jenga',  subtitle: 'Equity Bank API',         icon: 'flash-outline',          color: '#ef4444', bg: '#fef2f2' },
+  { value: 'KCB_OPEN_BANKING',  label: 'KCB',           subtitle: 'KCB Open Banking',        icon: 'key-outline',            color: '#f59e0b', bg: '#fffbeb' },
 ];
 
 function fmtKES(n: number) {
@@ -38,6 +40,20 @@ export default function NewPaymentScreen() {
   const [supplierOpen, setSupplierOpen] = useState(false);
   const [success, setSuccess] = useState<any>(null);
 
+  // ── Fetch configured payment gateways from the web app ───────────────────
+  const { data: gatewayConfig } = useQuery({
+    queryKey: ['configured-rails'],
+    queryFn: () => settingsApi.configuredRails().then((r) => r.data.data),
+    staleTime: 5 * 60 * 1000, // cache 5 min
+  });
+
+  // Build the list of rails to show — enabled ones first, disabled grayed out
+  const enabledRailValues: string[] = gatewayConfig?.enabledRails ?? [];
+  const RAILS = ALL_RAILS.map((r) => ({
+    ...r,
+    configured: enabledRailValues.length === 0 || enabledRailValues.includes(r.value),
+  })).sort((a, b) => (b.configured ? 1 : 0) - (a.configured ? 1 : 0));
+
   const { data: wallets } = useQuery({ queryKey: ['wallets'], queryFn: () => walletsApi.list().then(r => r.data.data ?? []) });
   const { data: supplierData } = useQuery({
     queryKey: ['suppliers-pick-mobile', supplierSearch],
@@ -52,6 +68,7 @@ export default function NewPaymentScreen() {
   const charges = rail === 'PESALINK' ? (numAmount <= 999 ? 35 : numAmount <= 9999 ? 55 : 75)
     : rail === 'RTGS' ? 450
     : ['EQUITY_JENGA', 'KCB_OPEN_BANKING'].includes(rail) ? 100 : 0;
+  const selectedRailMeta = ALL_RAILS.find((r) => r.value === rail);
 
   const mutation = useMutation({
     mutationFn: () => paymentsApi.initiate({
@@ -133,21 +150,62 @@ export default function NewPaymentScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Rail selection */}
+            {/* Rail selection — reads from payment gateway config */}
             <View style={s.section}>
-              <Text style={s.sLabel}>PAYMENT RAIL</Text>
-              <View style={s.railGrid}>
-                {RAILS.map(r => (
-                  <TouchableOpacity
-                    key={r.value}
-                    style={[s.railBtn, rail === r.value && { borderColor: r.color, backgroundColor: r.color + '15' }]}
-                    onPress={() => { setRail(r.value); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                  >
-                    <Text style={{ fontSize: 20 }}>{r.emoji}</Text>
-                    <Text style={[s.railBtnLabel, rail === r.value && { color: r.color }]}>{r.label}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                <Text style={s.sLabel}>PAYMENT RAIL</Text>
+                {gatewayConfig && (
+                  <View style={{ marginLeft: 8, flexDirection: 'row', alignItems: 'center', gap: 4,
+                    backgroundColor: gatewayConfig.hasAnyRail ? '#dcfce7' : '#fef9c3',
+                    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3,
+                      backgroundColor: gatewayConfig.hasAnyRail ? '#16a34a' : '#ca8a04' }} />
+                    <Text style={{ fontSize: 10, fontWeight: '700',
+                      color: gatewayConfig.hasAnyRail ? '#15803d' : '#92400e' }}>
+                      {gatewayConfig.hasAnyRail
+                        ? `${enabledRailValues.length} gateway${enabledRailValues.length !== 1 ? 's' : ''} live`
+                        : 'No gateways configured'}
+                    </Text>
+                  </View>
+                )}
               </View>
+              {RAILS.map((r) => (
+                <TouchableOpacity
+                  key={r.value}
+                  style={[s.railCard,
+                    rail === r.value && { borderColor: r.color, backgroundColor: r.bg },
+                    !r.configured && { opacity: 0.55 },
+                  ]}
+                  onPress={() => {
+                    setRail(r.value);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.railIconBox, { backgroundColor: rail === r.value ? r.color + '20' : '#f1f5f9' }]}>
+                    <Ionicons name={r.icon as any} size={20} color={rail === r.value ? r.color : '#64748b'} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.railCardLabel, rail === r.value && { color: r.color }]}>{r.label}</Text>
+                    <Text style={s.railCardSub}>{r.subtitle}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    {r.configured ? (
+                      <View style={s.railLiveBadge}>
+                        <View style={s.railLiveDot} />
+                        <Text style={s.railLiveText}>Live</Text>
+                      </View>
+                    ) : (
+                      <View style={s.railNotConfigBadge}>
+                        <Text style={s.railNotConfigText}>Not Configured</Text>
+                      </View>
+                    )}
+                    {rail === r.value && (
+                      <Ionicons name="checkmark-circle" size={16} color={r.color} />
+                    )}
+                  </View>
+                </TouchableOpacity>
+              ))}
             </View>
 
             {/* Wallet */}
@@ -380,19 +438,32 @@ const s = StyleSheet.create({
   stepDots: { flexDirection: 'row', gap: 6 },
   stepDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#334155' },
   stepDotActive: { backgroundColor: '#6366f1' },
-  body: { flex: 1 },
+  body: { flex: 1, backgroundColor: '#f8fafc' },
   stepContent: { padding: 16 },
-  stepTitle: { color: '#f1f5f9', fontSize: 20, fontWeight: '800', marginBottom: 20 },
+  stepTitle: { color: '#1e293b', fontSize: 20, fontWeight: '800', marginBottom: 20 },
 
   section: { marginBottom: 16 },
-  sLabel: { color: '#475569', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  sLabel: { color: '#94a3b8', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
 
-  supplierPickerBtn: { backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1, borderColor: '#334155', padding: 14 },
+  supplierPickerBtn: { backgroundColor: '#fff', borderRadius: 14, borderWidth: 1.5, borderColor: '#e2e8f0', padding: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 2 },
   supplierPickerText: { color: '#94a3b8', fontSize: 14 },
 
   railGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   railBtn: { width: '30.5%', alignItems: 'center', padding: 12, borderRadius: 14, backgroundColor: '#1e293b', borderWidth: 1.5, borderColor: '#334155', gap: 4 },
   railBtnLabel: { color: '#64748b', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+
+  railCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14,
+    backgroundColor: '#fff', borderWidth: 1.5, borderColor: '#e2e8f0', marginBottom: 8,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 4, elevation: 2 },
+  railIconBox: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  railCardLabel: { fontSize: 14, fontWeight: '700', color: '#1e293b' },
+  railCardSub: { fontSize: 11, color: '#94a3b8', marginTop: 1 },
+  railLiveBadge: { flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: '#dcfce7', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  railLiveDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#16a34a' },
+  railLiveText: { fontSize: 10, fontWeight: '700', color: '#15803d' },
+  railNotConfigBadge: { backgroundColor: '#fef3c7', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3 },
+  railNotConfigText: { fontSize: 9, fontWeight: '700', color: '#92400e' },
 
   walletChip: { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: '#334155', minWidth: 140 },
   walletChipActive: { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },

@@ -44,6 +44,37 @@ export async function GET(request: NextRequest) {
       return Response.json({ success: true, data: masked });
     }
 
+    // ── configured-rails: safe for mobile — no credentials exposed ──────────
+    if (section === 'configured-rails') {
+      if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
+      const creds = await prisma.apiCredential.findMany({
+        where: { organizationId: orgId, isActive: true },
+        select: { type: true, environment: true, name: true },
+      });
+      // Map ApiCredentialType → payment rail keys used in mobile
+      const RAIL_MAP: Record<string, string[]> = {
+        MPESA_DARAJA:  ['MPESA_B2C', 'MPESA_B2B_PAYBILL', 'MPESA_B2B_TILL'],
+        PESALINK:      ['PESALINK'],
+        RTGS_EFT:      ['RTGS'],
+        EQUITY_JENGA:  ['EQUITY_JENGA'],
+        KCB_OPEN_BANKING: ['KCB_OPEN_BANKING'],
+        EMAIL_SMTP:    [],
+      };
+      const enabledRails = new Set<string>();
+      for (const c of creds) {
+        const rails = RAIL_MAP[c.type] ?? [];
+        rails.forEach((r) => enabledRails.add(r));
+      }
+      return Response.json({
+        success: true,
+        data: {
+          configured: creds.map((c) => ({ type: c.type, environment: c.environment, name: c.name })),
+          enabledRails: Array.from(enabledRails),
+          hasAnyRail: enabledRails.size > 0,
+        },
+      });
+    }
+
     if (section === 'bank-accounts') {
       if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
       const accounts = await prisma.bankAccount.findMany({ where: { organizationId: orgId, isActive: true }, orderBy: { createdAt: 'desc' } });
