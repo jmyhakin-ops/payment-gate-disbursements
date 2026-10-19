@@ -1,13 +1,40 @@
 import { Tabs } from 'expo-router';
-import { View, Text } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { View, Text, Platform } from 'react-native';
 
-function TabIcon({ emoji, label, focused }: { emoji: string; label: string; focused: boolean }) {
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
+interface TabIconProps {
+  name: IoniconsName;
+  outlineName: IoniconsName;
+  label: string;
+  focused: boolean;
+  color: string;
+  badge?: number;
+}
+
+function TabIcon({ name, outlineName, label, focused, color, badge }: TabIconProps) {
   return (
-    <View style={{ alignItems: 'center', paddingTop: 4 }}>
-      <Text style={{ fontSize: focused ? 22 : 20 }}>{emoji}</Text>
+    <View style={{ alignItems: 'center', paddingTop: Platform.OS === 'ios' ? 6 : 4 }}>
+      <View style={{ position: 'relative' }}>
+        <Ionicons name={focused ? name : outlineName} size={24} color={color} />
+        {badge != null && badge > 0 && (
+          <View style={{
+            position: 'absolute', top: -4, right: -8,
+            backgroundColor: '#ef4444', borderRadius: 8,
+            minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center',
+            paddingHorizontal: 3, borderWidth: 1.5, borderColor: '#fff',
+          }}>
+            <Text style={{ fontSize: 9, color: '#fff', fontWeight: '700' }}>
+              {badge > 99 ? '99+' : badge}
+            </Text>
+          </View>
+        )}
+      </View>
       <Text style={{
-        fontSize: 10, fontWeight: '600', marginTop: 2,
-        color: focused ? '#6366f1' : '#64748b',
+        fontSize: 10, fontWeight: focused ? '700' : '500',
+        marginTop: 3, color,
+        letterSpacing: 0.2,
       }}>{label}</Text>
     </View>
   );
@@ -17,53 +44,93 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        headerShown: true,
-        headerStyle: { backgroundColor: '#1e293b' },
-        headerTintColor: '#f1f5f9',
-        headerTitleStyle: { fontWeight: '700', fontSize: 17 },
+        headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#1e293b',
-          borderTopColor: '#334155',
+          backgroundColor: '#ffffff',
+          borderTopColor: '#e2e8f0',
           borderTopWidth: 1,
-          height: 72,
-          paddingBottom: 8,
+          height: Platform.OS === 'ios' ? 84 : 68,
+          paddingBottom: Platform.OS === 'ios' ? 20 : 8,
+          paddingTop: 4,
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.06,
+          shadowRadius: 8,
+          elevation: 12,
         },
         tabBarShowLabel: false,
+        tabBarActiveTintColor: '#6366f1',
+        tabBarInactiveTintColor: '#94a3b8',
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          title: 'KenyaPay',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="🏠" label="Home" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="home"
+              outlineName="home-outline"
+              label="Home"
+              focused={focused}
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="payments"
         options={{
-          title: 'Payments',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💳" label="Payments" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="card"
+              outlineName="card-outline"
+              label="Payments"
+              focused={focused}
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="approvals"
         options={{
-          title: 'Approvals',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="✅" label="Approvals" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="shield-checkmark"
+              outlineName="shield-checkmark-outline"
+              label="Approvals"
+              focused={focused}
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="wallets"
         options={{
-          title: 'Wallets',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="💼" label="Wallets" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="wallet"
+              outlineName="wallet-outline"
+              label="Wallets"
+              focused={focused}
+              color={color}
+            />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
-          tabBarIcon: ({ focused }) => <TabIcon emoji="👤" label="Profile" focused={focused} />,
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="person-circle"
+              outlineName="person-circle-outline"
+              label="Profile"
+              focused={focused}
+              color={color}
+            />
+          ),
         }}
       />
     </Tabs>

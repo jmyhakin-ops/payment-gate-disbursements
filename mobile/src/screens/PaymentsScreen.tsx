@@ -1,197 +1,206 @@
 import React, { useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet,
-  TextInput, RefreshControl, ActivityIndicator, Alert,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  TextInput, RefreshControl, Platform,
 } from 'react-native';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { paymentsApi } from '../../services/api';
-import { useAuthStore } from '../../store/auth.store';
+import { LinearGradient } from 'expo-linear-gradient';
+import { paymentsApi } from '../services/api';
 
-function formatKES(n: number) {
-  return `KES ${n.toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
+  COMPLETED:        { label: 'Completed',   color: '#10b981', bg: '#042f2e' },
+  PROCESSING:       { label: 'Processing',  color: '#3b82f6', bg: '#0c1e3e' },
+  PENDING_CHECKER:  { label: 'Checker',     color: '#f59e0b', bg: '#2d1e06' },
+  PENDING_DIRECTOR: { label: 'Director',    color: '#a855f7', bg: '#1e0f40' },
+  FAILED:           { label: 'Failed',      color: '#ef4444', bg: '#2d0f0f' },
+  CANCELLED:        { label: 'Cancelled',   color: '#64748b', bg: '#1e293b' },
+  REJECTED:         { label: 'Rejected',    color: '#f43f5e', bg: '#3a0e1a' },
+};
+const RAIL_EMOJI: Record<string, string> = {
+  MPESA_B2C: '📱', MPESA_B2B_PAYBILL: '🏦', MPESA_B2B_TILL: '🛒',
+  PESALINK: '🏛️', RTGS: '💸', EQUITY_JENGA: '⚡', KCB_OPEN_BANKING: '🔑',
+};
+
+function fmtKES(n: number) {
+  return `KES ${Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+}
+function timeAgo(d: string) {
+  const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return new Date(d).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' });
 }
 
-const STATUS_COLORS: Record<string, [string, string]> = {
-  COMPLETED: ['#10b981', '#d1fae5'],
-  FAILED: ['#ef4444', '#fee2e2'],
-  PENDING_DIRECTOR: ['#f59e0b', '#fef3c7'],
-  PENDING_CHECKER: ['#f59e0b', '#fef3c7'],
-  PROCESSING: ['#6366f1', '#e0e7ff'],
-  CANCELLED: ['#6b7280', '#1e293b'],
-};
-
-const RAIL_ICONS: Record<string, string> = {
-  MPESA_B2C: '📱', MPESA_B2B: '🏦', MPESA_PAYBILL: '🏦',
-  MPESA_TILL: '🛒', BANK: '🏛️', RTGS: '💸',
-  EQUITY_JENGA: '🔷', KCB_OPENBANKING: '🟩',
-};
-
-const STATUS_FILTERS = ['ALL', 'PENDING_CHECKER', 'PENDING_DIRECTOR', 'COMPLETED', 'FAILED'];
+const FILTERS = ['ALL', 'PENDING_CHECKER', 'PENDING_DIRECTOR', 'COMPLETED', 'FAILED', 'REJECTED'];
 
 export default function PaymentsScreen() {
-  const { user } = useAuthStore();
-  const qc = useQueryClient();
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [activeFilter, setActiveFilter] = useState('ALL');
   const [page, setPage] = useState(1);
 
-  const params: Record<string, any> = { page, limit: 25 };
-  if (search) params.search = search;
-  if (statusFilter !== 'ALL') params.status = statusFilter;
-
-  const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['mobile-payments', params],
-    queryFn: () => paymentsApi.list(params).then(r => r.data),
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['mobile-payments', search, activeFilter, page],
+    queryFn: () => paymentsApi.list({
+      search: search || undefined,
+      status: activeFilter !== 'ALL' ? activeFilter : undefined,
+      page, limit: 20, sortBy: 'createdAt', sortDir: 'desc',
+    }).then(r => r.data),
     keepPreviousData: true,
   });
 
   const payments: any[] = data?.data ?? [];
-  const hasMore = data?.pagination?.page < data?.pagination?.pages;
-
-  const renderItem = ({ item }: { item: any }) => {
-    const [textColor, bgColor] = STATUS_COLORS[item.status] ?? ['#6b7280', '#1e293b'];
-    return (
-      <TouchableOpacity
-        style={styles.paymentCard}
-        onPress={() => router.push(`/(tabs)/payments/${item.id}` as any)}
-        activeOpacity={0.8}
-      >
-        <View style={styles.cardRow}>
-          <View style={styles.railIcon}>
-            <Text style={{ fontSize: 20 }}>{RAIL_ICONS[item.rail] ?? '💳'}</Text>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.recipientName} numberOfLines={1}>
-              {item.recipientName ?? item.recipientPhone ?? item.paybillNumber ?? item.reference}
-            </Text>
-            <Text style={styles.txRef}>{item.reference} · {new Date(item.createdAt).toLocaleDateString('en-KE')}</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.amount}>{formatKES(item.amount)}</Text>
-            <View style={[styles.statusBadge, { backgroundColor: bgColor }]}>
-              <Text style={[styles.statusText, { color: textColor }]}>
-                {item.status?.replace(/_/g, ' ')}
-              </Text>
-            </View>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
+  const total = data?.pagination?.total ?? 0;
+  const pages = data?.pagination?.pages ?? 1;
 
   return (
-    <View style={styles.container}>
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="🔍  Search payments..."
-          placeholderTextColor="#475569"
-          value={search}
-          onChangeText={setSearch}
-        />
-      </View>
-
-      {/* Status Filter Chips */}
-      <FlatList
-        data={STATUS_FILTERS}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        keyExtractor={i => i}
-        contentContainerStyle={styles.chipsRow}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.chip, statusFilter === item && styles.chipActive]}
-            onPress={() => { setStatusFilter(item); setPage(1); }}
-          >
-            <Text style={[styles.chipText, statusFilter === item && { color: '#fff' }]}>
-              {item.replace(/_/g, ' ')}
-            </Text>
-          </TouchableOpacity>
-        )}
-      />
-
-      {/* Payment List */}
-      <FlatList
-        data={payments}
-        keyExtractor={i => i.id}
-        renderItem={renderItem}
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={isFetching} onRefresh={() => { setPage(1); refetch(); }} tintColor="#6366f1" />
-        }
-        ListEmptyComponent={
-          isLoading ? (
-            <ActivityIndicator color="#6366f1" style={{ margin: 40 }} />
-          ) : (
-            <View style={styles.empty}>
-              <Text style={{ fontSize: 40, marginBottom: 8 }}>💸</Text>
-              <Text style={styles.emptyText}>No payments found</Text>
-            </View>
-          )
-        }
-        ListFooterComponent={
-          hasMore ? (
-            <TouchableOpacity style={styles.loadMoreBtn} onPress={() => setPage(p => p + 1)}>
-              <Text style={styles.loadMoreText}>Load More</Text>
+    <View style={s.root}>
+      {/* Header */}
+      <LinearGradient colors={['#1e1b4b', '#0f172a']} style={s.header}>
+        <Text style={s.headerTitle}>Payments</Text>
+        <Text style={s.headerSub}>{total} total transactions</Text>
+        {/* Search */}
+        <View style={s.searchBox}>
+          <Text style={s.searchIcon}>🔍</Text>
+          <TextInput
+            style={s.searchInput}
+            value={search}
+            onChangeText={v => { setSearch(v); setPage(1); }}
+            placeholder="Search recipient, reference..."
+            placeholderTextColor="#475569"
+          />
+          {search ? (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <Text style={{ color: '#64748b', fontSize: 16 }}>✕</Text>
             </TouchableOpacity>
-          ) : null
-        }
-      />
+          ) : null}
+        </View>
+
+        {/* Filter chips */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4, gap: 8 }}>
+          {FILTERS.map(f => (
+            <TouchableOpacity
+              key={f}
+              style={[s.filterChip, activeFilter === f && s.filterChipActive]}
+              onPress={() => { setActiveFilter(f); setPage(1); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+            >
+              <Text style={[s.filterChipText, activeFilter === f && s.filterChipTextActive]}>
+                {f === 'ALL' ? 'All' : f.replace(/_/g, ' ')}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </LinearGradient>
 
       {/* FAB */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => router.push('/(tabs)/payments/new' as any)}
-        activeOpacity={0.85}
-      >
-        <Text style={styles.fabIcon}>+</Text>
+      <TouchableOpacity style={s.fab} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); router.push('/(tabs)/payments/new'); }}>
+        <LinearGradient colors={['#4f46e5', '#6d28d9']} style={s.fabInner}>
+          <Text style={s.fabText}>+</Text>
+        </LinearGradient>
       </TouchableOpacity>
+
+      <ScrollView
+        style={s.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor="#6366f1" />}
+      >
+        {payments.length === 0 && !isLoading ? (
+          <View style={s.empty}>
+            <Text style={{ fontSize: 48, marginBottom: 12 }}>💳</Text>
+            <Text style={s.emptyTitle}>No payments found</Text>
+            <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/(tabs)/payments/new')}>
+              <Text style={s.emptyBtnText}>Make First Payment</Text>
+            </TouchableOpacity>
+          </View>
+        ) : payments.map((tx: any) => {
+          const st = STATUS_CONFIG[tx.status] ?? STATUS_CONFIG.FAILED;
+          const initials = ((tx.recipientName ?? '??').split(' ').map((w: string) => w[0]).join('').slice(0, 2)).toUpperCase();
+          return (
+            <TouchableOpacity
+              key={tx.id}
+              style={s.txCard}
+              onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push(`/(tabs)/payments/${tx.id}` as any); }}
+              activeOpacity={0.85}
+            >
+              {/* Avatar */}
+              <View style={[s.txAvatar, { backgroundColor: st.color + '22', borderColor: st.color + '44' }]}>
+                <Text style={{ fontSize: 18 }}>{RAIL_EMOJI[tx.rail] ?? '💳'}</Text>
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={s.txRecipient} numberOfLines={1}>{tx.recipientName ?? '—'}</Text>
+                <Text style={s.txMeta}>
+                  {tx.reference?.substring(0, 16)} · {timeAgo(tx.createdAt)}
+                </Text>
+                <Text style={s.txDesc} numberOfLines={1}>{tx.description ?? tx.rail?.replace(/_/g, ' ')}</Text>
+              </View>
+
+              <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                <Text style={s.txAmount}>{fmtKES(Number(tx.amount))}</Text>
+                <View style={[s.txStatusPill, { backgroundColor: st.bg, borderColor: st.color + '44' }]}>
+                  <Text style={[s.txStatusText, { color: st.color }]}>{st.label}</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+
+        {/* Pagination */}
+        {pages > 1 && (
+          <View style={s.pagination}>
+            <TouchableOpacity style={[s.pageBtn, page <= 1 && { opacity: 0.3 }]} disabled={page <= 1} onPress={() => setPage(p => p - 1)}>
+              <Text style={s.pageBtnText}>← Prev</Text>
+            </TouchableOpacity>
+            <Text style={s.pageInfo}>{page} / {pages}</Text>
+            <TouchableOpacity style={[s.pageBtn, page >= pages && { opacity: 0.3 }]} disabled={page >= pages} onPress={() => setPage(p => p + 1)}>
+              <Text style={s.pageBtnText}>Next →</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={{ height: 100 }} />
+      </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  searchContainer: { padding: 12 },
-  searchInput: {
-    backgroundColor: '#1e293b', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
-    color: '#f1f5f9', fontSize: 14, borderWidth: 1, borderColor: '#334155',
-  },
-  chipsRow: { paddingHorizontal: 12, paddingBottom: 8, gap: 6 },
-  chip: {
-    paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20,
-    backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155',
-  },
-  chipActive: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
-  chipText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
-  list: { padding: 12, paddingBottom: 100, gap: 8 },
-  paymentCard: { backgroundColor: '#1e293b', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#334155' },
-  cardRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  railIcon: {
-    width: 40, height: 40, borderRadius: 12,
-    backgroundColor: '#0f172a', alignItems: 'center', justifyContent: 'center',
-  },
-  recipientName: { color: '#f1f5f9', fontSize: 14, fontWeight: '700' },
-  txRef: { color: '#64748b', fontSize: 11, marginTop: 2 },
-  amount: { color: '#f1f5f9', fontSize: 14, fontWeight: '800' },
-  statusBadge: { borderRadius: 8, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3 },
-  statusText: { fontSize: 10, fontWeight: '700' },
-  empty: { alignItems: 'center', padding: 40 },
-  emptyText: { color: '#64748b', fontSize: 14 },
-  loadMoreBtn: {
-    backgroundColor: '#1e293b', borderRadius: 12, margin: 12,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  loadMoreText: { color: '#6366f1', fontSize: 14, fontWeight: '600' },
-  fab: {
-    position: 'absolute', bottom: 24, right: 20,
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#4f46e5', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 8, elevation: 6,
-  },
-  fabIcon: { color: '#fff', fontSize: 28, fontWeight: '700', lineHeight: 32 },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0a0f1e' },
+  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 12, paddingHorizontal: 16, gap: 10 },
+  headerTitle: { color: '#f1f5f9', fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
+  headerSub: { color: '#475569', fontSize: 13 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1, borderColor: '#334155', paddingHorizontal: 14, height: 48, gap: 10 },
+  searchIcon: { fontSize: 16 },
+  searchInput: { flex: 1, color: '#f1f5f9', fontSize: 14 },
+  filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
+  filterChipActive: { backgroundColor: '#4f46e5', borderColor: '#6366f1' },
+  filterChipText: { color: '#64748b', fontSize: 12, fontWeight: '600' },
+  filterChipTextActive: { color: '#fff' },
+
+  fab: { position: 'absolute', right: 20, bottom: 90, zIndex: 50 },
+  fabInner: { width: 56, height: 56, borderRadius: 18, alignItems: 'center', justifyContent: 'center', shadowColor: '#4f46e5', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 10 },
+  fabText: { color: '#fff', fontSize: 28, fontWeight: '300', lineHeight: 32 },
+
+  list: { flex: 1, paddingHorizontal: 12, paddingTop: 8 },
+
+  txCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#1e293b', borderRadius: 16, padding: 14, marginBottom: 8, borderWidth: 1, borderColor: '#334155' },
+  txAvatar: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  txRecipient: { color: '#f1f5f9', fontSize: 14, fontWeight: '700' },
+  txMeta: { color: '#475569', fontSize: 11, marginTop: 2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  txDesc: { color: '#64748b', fontSize: 12, marginTop: 3 },
+  txAmount: { color: '#10b981', fontSize: 15, fontWeight: '800' },
+  txStatusPill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20, borderWidth: 1 },
+  txStatusText: { fontSize: 10, fontWeight: '700' },
+
+  empty: { alignItems: 'center', paddingVertical: 80 },
+  emptyTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '700', marginBottom: 16 },
+  emptyBtn: { backgroundColor: '#4f46e5', borderRadius: 14, paddingHorizontal: 24, paddingVertical: 12 },
+  emptyBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
+  pagination: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 4 },
+  pageBtn: { backgroundColor: '#1e293b', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 },
+  pageBtnText: { color: '#6366f1', fontSize: 13, fontWeight: '700' },
+  pageInfo: { color: '#64748b', fontSize: 13 },
 });

@@ -1,54 +1,69 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView,
-  Platform, Switch,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet,
+  TextInput, Alert, ActivityIndicator, Platform, Modal,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { paymentsApi, walletsApi } from '../../services/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { paymentsApi, walletsApi, suppliersApi, apiClient } from '../services/api';
 
 const RAILS = [
-  { key: 'MPESA_B2C', label: 'M-Pesa B2C', icon: '📱', desc: 'Direct to phone' },
-  { key: 'MPESA_PAYBILL', label: 'M-Pesa Paybill', icon: '🏦', desc: 'Paybill payment' },
-  { key: 'MPESA_TILL', label: 'Buy Goods Till', icon: '🛒', desc: 'Till payment' },
-  { key: 'BANK', label: 'Bank (PesaLink)', icon: '🏛️', desc: 'Up to KES 999,999' },
-  { key: 'RTGS', label: 'RTGS / EFT', icon: '💸', desc: 'Large transfers' },
+  { value: 'MPESA_B2C', label: 'M-Pesa B2C', emoji: '📱', color: '#10b981' },
+  { value: 'MPESA_B2B_PAYBILL', label: 'Paybill', emoji: '🏦', color: '#10b981' },
+  { value: 'MPESA_B2B_TILL', label: 'Buy Goods', emoji: '🛒', color: '#10b981' },
+  { value: 'PESALINK', label: 'PesaLink', emoji: '🏛️', color: '#3b82f6' },
+  { value: 'RTGS', label: 'RTGS/EFT', emoji: '💸', color: '#8b5cf6' },
+  { value: 'EQUITY_JENGA', label: 'Equity', emoji: '⚡', color: '#ef4444' },
+  { value: 'KCB_OPEN_BANKING', label: 'KCB', emoji: '🔑', color: '#f59e0b' },
 ];
 
-function formatKES(n: number) {
-  return `KES ${n.toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
+function fmtKES(n: number) {
+  return `KES ${Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}`;
 }
 
 export default function NewPaymentScreen() {
-  const { rail: defaultRail } = useLocalSearchParams<{ rail?: string }>();
+  const qc = useQueryClient();
+  const [step, setStep] = useState(1);
+  const [rail, setRail] = useState('MPESA_B2C');
+  const [walletId, setWalletId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [description, setDescription] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const [recipientAccount, setRecipientAccount] = useState('');
+  const [recipientBank, setRecipientBank] = useState('');
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [supplierOpen, setSupplierOpen] = useState(false);
+  const [success, setSuccess] = useState<any>(null);
 
-  const [step, setStep] = useState<'rail' | 'details' | 'confirm'>('rail');
-  const [selectedRail, setSelectedRail] = useState(defaultRail ?? '');
-  const [form, setForm] = useState({
-    recipientPhone: '', recipientName: '', recipientAccount: '',
-    recipientBank: '', paybillNumber: '', tillNumber: '', accountRef: '',
-    amount: '', description: '', walletId: '',
+  const { data: wallets } = useQuery({ queryKey: ['wallets'], queryFn: () => walletsApi.list().then(r => r.data.data ?? []) });
+  const { data: supplierData } = useQuery({
+    queryKey: ['suppliers-pick-mobile', supplierSearch],
+    queryFn: () => suppliersApi.list({ search: supplierSearch, status: 'ACTIVE', limit: 10 }).then(r => r.data.data ?? []),
+    enabled: supplierOpen,
   });
 
-  const { data: walletsData } = useQuery({
-    queryKey: ['mobile-wallets-list'],
-    queryFn: () => walletsApi.list().then(r => r.data.data),
-  });
-
-  const wallets: any[] = walletsData ?? [];
+  const isMpesa = rail.startsWith('MPESA');
+  const isBank = ['PESALINK', 'RTGS', 'EQUITY_JENGA', 'KCB_OPEN_BANKING'].includes(rail);
+  const selectedWallet = (wallets ?? []).find((w: any) => w.id === walletId);
+  const numAmount = parseFloat(amount.replace(/,/g, '')) || 0;
+  const charges = rail === 'PESALINK' ? (numAmount <= 999 ? 35 : numAmount <= 9999 ? 55 : 75)
+    : rail === 'RTGS' ? 450
+    : ['EQUITY_JENGA', 'KCB_OPEN_BANKING'].includes(rail) ? 100 : 0;
 
   const mutation = useMutation({
-    mutationFn: (body: any) => paymentsApi.create(body),
+    mutationFn: () => paymentsApi.initiate({
+      walletId, rail, amount: numAmount,
+      recipientName, recipientPhone: isMpesa ? recipientPhone : undefined,
+      recipientAccount: !isMpesa ? recipientAccount : undefined,
+      recipientBank, description,
+    }),
     onSuccess: (res) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      const txId = res.data.data?.id;
-      Alert.alert(
-        '✅ Payment Submitted',
-        'Your payment has been submitted and is pending approval.',
-        [{ text: 'View Details', onPress: () => router.push(`/(tabs)/payments/${txId}` as any) }]
-      );
+      qc.invalidateQueries({ queryKey: ['mobile-recent-tx'] });
+      setSuccess(res.data.data);
     },
     onError: (e: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -56,213 +71,379 @@ export default function NewPaymentScreen() {
     },
   });
 
-  const handleSubmit = () => {
-    if (!form.amount || isNaN(Number(form.amount))) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount');
-      return;
-    }
-    const body: any = {
-      rail: selectedRail,
-      amount: Number(form.amount),
-      description: form.description,
-      walletId: form.walletId || wallets[0]?.id,
-    };
-    if (selectedRail === 'MPESA_B2C') body.recipientPhone = form.recipientPhone;
-    if (selectedRail === 'MPESA_PAYBILL') { body.paybillNumber = form.paybillNumber; body.accountRef = form.accountRef; }
-    if (selectedRail === 'MPESA_TILL') body.tillNumber = form.tillNumber;
-    if (selectedRail === 'BANK' || selectedRail === 'RTGS') {
-      body.recipientAccount = form.recipientAccount;
-      body.recipientBank = form.recipientBank;
-      body.recipientName = form.recipientName;
-    }
-    mutation.mutate(body);
+  const selectSupplier = (s: any) => {
+    setRecipientName(s.accountName ?? s.name);
+    if (s.type === 'MPESA_B2C') { setRail('MPESA_B2C'); setRecipientPhone(s.phone ?? ''); }
+    else if (s.type === 'MPESA_PAYBILL') { setRail('MPESA_B2B_PAYBILL'); setRecipientAccount(s.paybillNumber ?? ''); }
+    else if (s.type === 'MPESA_TILL') { setRail('MPESA_B2B_TILL'); setRecipientAccount(s.tillNumber ?? ''); }
+    else { setRail(s.type === 'RTGS' ? 'RTGS' : 'PESALINK'); setRecipientAccount(s.accountNumber ?? ''); setRecipientBank(s.bankName ?? ''); }
+    setSupplierOpen(false);
   };
 
-  // Rail selection step
-  if (step === 'rail') {
-    return (
-      <View style={styles.container}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.pageTitle}>New Payment</Text>
-          <Text style={styles.pageSubtitle}>Choose payment channel</Text>
-          <View style={styles.railsGrid}>
-            {RAILS.map(rail => (
-              <TouchableOpacity
-                key={rail.key}
-                style={[styles.railCard, selectedRail === rail.key && styles.railCardActive]}
-                onPress={() => { setSelectedRail(rail.key); Haptics.selectionAsync(); }}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.railIcon}>{rail.icon}</Text>
-                <Text style={[styles.railLabel, selectedRail === rail.key && { color: '#fff' }]}>{rail.label}</Text>
-                <Text style={[styles.railDesc, selectedRail === rail.key && { color: 'rgba(255,255,255,0.7)' }]}>{rail.desc}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <TouchableOpacity
-            style={[styles.nextBtn, !selectedRail && { opacity: 0.4 }]}
-            disabled={!selectedRail}
-            onPress={() => setStep('details')}
-            activeOpacity={0.85}
-          >
-            <Text style={styles.nextBtnText}>Continue →</Text>
-          </TouchableOpacity>
-        </ScrollView>
+  if (success) return (
+    <LinearGradient colors={['#030712', '#0f172a']} style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
+      <LinearGradient colors={['#065f46', '#047857']} style={s.successCircle}>
+        <Text style={{ fontSize: 44 }}>✓</Text>
+      </LinearGradient>
+      <Text style={s.successTitle}>Payment Submitted!</Text>
+      <Text style={s.successRef}>Ref: {success.reference}</Text>
+      <Text style={s.successSub}>Awaiting Checker → Director approval</Text>
+      <View style={s.successBtns}>
+        <TouchableOpacity style={s.successBtnPrimary} onPress={() => router.push(`/(tabs)/payments/${success.id}` as any)}>
+          <Text style={s.successBtnPrimaryText}>View Transaction</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.successBtnSecondary} onPress={() => { setSuccess(null); setStep(1); setAmount(''); setDescription(''); setRecipientName(''); setRecipientPhone(''); setRecipientAccount(''); }}>
+          <Text style={s.successBtnSecondaryText}>New Payment</Text>
+        </TouchableOpacity>
       </View>
-    );
-  }
-
-  // Details step
-  return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {/* Breadcrumb */}
-        <TouchableOpacity onPress={() => setStep('rail')}>
-          <Text style={styles.back}>← Change Rail</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.pageTitle}>Payment Details</Text>
-        <Text style={styles.railBadge}>
-          {RAILS.find(r => r.key === selectedRail)?.icon} {RAILS.find(r => r.key === selectedRail)?.label}
-        </Text>
-
-        {/* Wallet Selector */}
-        <Text style={styles.label}>Debit from Wallet</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
-          {wallets.map((w: any) => (
-            <TouchableOpacity
-              key={w.id}
-              style={[styles.walletChip, form.walletId === w.id && styles.walletChipActive]}
-              onPress={() => setForm(f => ({ ...f, walletId: w.id }))}
-            >
-              <Text style={[styles.walletChipText, form.walletId === w.id && { color: '#fff' }]}>
-                {w.name} · {formatKES(w.balance ?? 0)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Rail-specific fields */}
-        {selectedRail === 'MPESA_B2C' && (
-          <Field label="M-Pesa Phone *" placeholder="07XX XXX XXX" value={form.recipientPhone}
-            onChangeText={v => setForm(f => ({ ...f, recipientPhone: v }))} keyboardType="phone-pad" />
-        )}
-        {selectedRail === 'MPESA_PAYBILL' && (<>
-          <Field label="Paybill Number *" placeholder="e.g. 522522" value={form.paybillNumber}
-            onChangeText={v => setForm(f => ({ ...f, paybillNumber: v }))} keyboardType="numeric" />
-          <Field label="Account Reference" placeholder="e.g. your account/invoice" value={form.accountRef}
-            onChangeText={v => setForm(f => ({ ...f, accountRef: v }))} />
-        </>)}
-        {selectedRail === 'MPESA_TILL' && (
-          <Field label="Till Number *" placeholder="e.g. 123456" value={form.tillNumber}
-            onChangeText={v => setForm(f => ({ ...f, tillNumber: v }))} keyboardType="numeric" />
-        )}
-        {(selectedRail === 'BANK' || selectedRail === 'RTGS') && (<>
-          <Field label="Bank Code" placeholder="e.g. KCB, EQUITY" value={form.recipientBank}
-            onChangeText={v => setForm(f => ({ ...f, recipientBank: v.toUpperCase() }))} autoCapitalize="characters" />
-          <Field label="Account Number *" placeholder="Enter account number" value={form.recipientAccount}
-            onChangeText={v => setForm(f => ({ ...f, recipientAccount: v }))} keyboardType="numeric" />
-          <Field label="Account Name *" placeholder="As on bank records" value={form.recipientName}
-            onChangeText={v => setForm(f => ({ ...f, recipientName: v }))} />
-        </>)}
-
-        {/* Amount */}
-        <Text style={styles.label}>Amount (KES) *</Text>
-        <TextInput
-          style={[styles.input, styles.amountInput]}
-          placeholder="0.00"
-          placeholderTextColor="#475569"
-          value={form.amount}
-          onChangeText={v => setForm(f => ({ ...f, amount: v }))}
-          keyboardType="decimal-pad"
-        />
-
-        {/* Description */}
-        <Field label="Description / Narration" placeholder="What is this payment for?" value={form.description}
-          onChangeText={v => setForm(f => ({ ...f, description: v }))} multiline />
-
-        {/* Info */}
-        <View style={styles.infoBox}>
-          <Text style={styles.infoText}>
-            🔐 This payment will go through Maker → Checker → Director approval before funds are disbursed.
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.nextBtn, mutation.isLoading && { opacity: 0.6 }]}
-          onPress={handleSubmit}
-          disabled={mutation.isLoading}
-          activeOpacity={0.85}
-        >
-          {mutation.isLoading
-            ? <ActivityIndicator color="#fff" />
-            : <Text style={styles.nextBtnText}>Submit Payment</Text>
-          }
-        </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
+    </LinearGradient>
   );
-}
 
-function Field({ label, placeholder, value, onChangeText, keyboardType, multiline, autoCapitalize }: any) {
   return (
-    <View style={{ marginBottom: 14 }}>
-      <Text style={styles.label}>{label}</Text>
-      <TextInput
-        style={[styles.input, multiline && { height: 80, textAlignVertical: 'top' }]}
-        placeholder={placeholder}
-        placeholderTextColor="#475569"
-        value={value}
-        onChangeText={onChangeText}
-        keyboardType={keyboardType}
-        multiline={multiline}
-        autoCapitalize={autoCapitalize ?? 'none'}
-      />
+    <View style={s.root}>
+      {/* Header */}
+      <LinearGradient colors={['#1e1b4b', '#0f172a']} style={s.header}>
+        <TouchableOpacity onPress={() => step > 1 ? setStep(step - 1) : router.back()} style={s.backBtn}>
+          <Text style={s.backText}>←</Text>
+        </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <Text style={s.headerTitle}>New Payment</Text>
+          <Text style={s.headerSub}>Step {step} of 3</Text>
+        </View>
+        {/* Step indicator */}
+        <View style={s.stepDots}>
+          {[1, 2, 3].map(i => <View key={i} style={[s.stepDot, i <= step && s.stepDotActive]} />)}
+        </View>
+      </LinearGradient>
+
+      <ScrollView style={s.body} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+        {/* ── STEP 1: Supplier + Rail + Wallet ── */}
+        {step === 1 && (
+          <View style={s.stepContent}>
+            <Text style={s.stepTitle}>💳 Payment Method</Text>
+
+            {/* Supplier Picker */}
+            <View style={s.section}>
+              <Text style={s.sLabel}>SEARCH SUPPLIER (AUTO-FILL)</Text>
+              <TouchableOpacity style={s.supplierPickerBtn} onPress={() => setSupplierOpen(true)}>
+                <Text style={s.supplierPickerText}>
+                  {recipientName ? `✅ ${recipientName}` : '🔍 Search & select a supplier...'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Rail selection */}
+            <View style={s.section}>
+              <Text style={s.sLabel}>PAYMENT RAIL</Text>
+              <View style={s.railGrid}>
+                {RAILS.map(r => (
+                  <TouchableOpacity
+                    key={r.value}
+                    style={[s.railBtn, rail === r.value && { borderColor: r.color, backgroundColor: r.color + '15' }]}
+                    onPress={() => { setRail(r.value); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+                  >
+                    <Text style={{ fontSize: 20 }}>{r.emoji}</Text>
+                    <Text style={[s.railBtnLabel, rail === r.value && { color: r.color }]}>{r.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Wallet */}
+            <View style={s.section}>
+              <Text style={s.sLabel}>SOURCE WALLET</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginHorizontal: -16 }} contentContainerStyle={{ paddingHorizontal: 16, gap: 10 }}>
+                {(wallets ?? []).map((w: any) => (
+                  <TouchableOpacity
+                    key={w.id}
+                    style={[s.walletChip, walletId === w.id && s.walletChipActive]}
+                    onPress={() => setWalletId(w.id)}
+                  >
+                    <Text style={s.walletChipName}>{w.name}</Text>
+                    <Text style={[s.walletChipBal, walletId === w.id && { color: '#10b981' }]}>
+                      {fmtKES(Number(w.balance) - Number(w.reservedBalance))}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            <TouchableOpacity
+              style={[s.nextBtn, (!walletId || !rail) && { opacity: 0.4 }]}
+              disabled={!walletId || !rail}
+              onPress={() => setStep(2)}
+            >
+              <LinearGradient colors={['#4f46e5', '#6d28d9']} style={s.nextBtnInner}>
+                <Text style={s.nextBtnText}>Continue →</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── STEP 2: Recipient ── */}
+        {step === 2 && (
+          <View style={s.stepContent}>
+            <Text style={s.stepTitle}>👤 Recipient Details</Text>
+
+            <View style={s.section}>
+              <Text style={s.sLabel}>RECIPIENT NAME *</Text>
+              <TextInput
+                style={s.textInput}
+                value={recipientName}
+                onChangeText={setRecipientName}
+                placeholder="Full name or business name"
+                placeholderTextColor="#475569"
+              />
+            </View>
+
+            {isMpesa && (
+              <View style={s.section}>
+                <Text style={s.sLabel}>
+                  {rail === 'MPESA_B2C' ? 'PHONE NUMBER *' : 'PAYBILL / TILL NUMBER *'}
+                </Text>
+                <TextInput
+                  style={s.textInput}
+                  value={recipientPhone}
+                  onChangeText={setRecipientPhone}
+                  placeholder={rail === 'MPESA_B2C' ? '0712345678' : '174379'}
+                  placeholderTextColor="#475569"
+                  keyboardType="phone-pad"
+                />
+              </View>
+            )}
+
+            {isBank && (
+              <>
+                <View style={s.section}>
+                  <Text style={s.sLabel}>ACCOUNT NUMBER *</Text>
+                  <TextInput style={s.textInput} value={recipientAccount} onChangeText={setRecipientAccount} placeholder="0123456789" placeholderTextColor="#475569" keyboardType="numeric" />
+                </View>
+                <View style={s.section}>
+                  <Text style={s.sLabel}>BANK NAME</Text>
+                  <TextInput style={s.textInput} value={recipientBank} onChangeText={setRecipientBank} placeholder="e.g. Equity Bank" placeholderTextColor="#475569" />
+                </View>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[s.nextBtn, !recipientName && { opacity: 0.4 }]}
+              disabled={!recipientName}
+              onPress={() => setStep(3)}
+            >
+              <LinearGradient colors={['#4f46e5', '#6d28d9']} style={s.nextBtnInner}>
+                <Text style={s.nextBtnText}>Continue →</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── STEP 3: Amount + Description ── */}
+        {step === 3 && (
+          <View style={s.stepContent}>
+            <Text style={s.stepTitle}>💰 Amount & Details</Text>
+
+            <View style={s.amountBox}>
+              <Text style={s.amountPrefix}>KES</Text>
+              <TextInput
+                style={s.amountInput}
+                value={amount}
+                onChangeText={setAmount}
+                placeholder="0.00"
+                placeholderTextColor="#334155"
+                keyboardType="decimal-pad"
+                autoFocus
+              />
+            </View>
+
+            {numAmount > 0 && (
+              <View style={s.breakdown}>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Amount</Text>
+                  <Text style={s.breakdownValue}>{fmtKES(numAmount)}</Text>
+                </View>
+                <View style={s.breakdownRow}>
+                  <Text style={s.breakdownLabel}>Transaction Charges</Text>
+                  <Text style={[s.breakdownValue, { color: '#f59e0b' }]}>+ {fmtKES(charges)}</Text>
+                </View>
+                <View style={[s.breakdownRow, { borderTopWidth: 1, borderTopColor: '#334155', marginTop: 6, paddingTop: 10 }]}>
+                  <Text style={[s.breakdownLabel, { color: '#f1f5f9', fontWeight: '700' }]}>Total Debit</Text>
+                  <Text style={[s.breakdownValue, { color: '#6366f1', fontSize: 18 }]}>{fmtKES(numAmount + charges)}</Text>
+                </View>
+                {selectedWallet && (numAmount + charges) > (Number(selectedWallet.balance) - Number(selectedWallet.reservedBalance)) && (
+                  <Text style={s.insufficientText}>⚠️ Insufficient wallet balance</Text>
+                )}
+              </View>
+            )}
+
+            <View style={s.section}>
+              <Text style={s.sLabel}>PURPOSE / DESCRIPTION *</Text>
+              <TextInput
+                style={[s.textInput, { height: 80, textAlignVertical: 'top' }]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Purpose of this payment..."
+                placeholderTextColor="#475569"
+                multiline
+              />
+            </View>
+
+            {/* Summary card */}
+            <View style={s.summaryCard}>
+              <Text style={s.summaryTitle}>Payment Summary</Text>
+              {[
+                { l: 'To', v: recipientName },
+                { l: 'Rail', v: RAILS.find(r => r.value === rail)?.label ?? rail },
+                { l: 'Wallet', v: selectedWallet?.name ?? '—' },
+              ].map(r => (
+                <View key={r.l} style={s.summaryRow}>
+                  <Text style={s.summaryLabel}>{r.l}</Text>
+                  <Text style={s.summaryValue} numberOfLines={1}>{r.v}</Text>
+                </View>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={[s.nextBtn, (!numAmount || !description || mutation.isPending) && { opacity: 0.4 }]}
+              disabled={!numAmount || !description || mutation.isPending}
+              onPress={() => {
+                Alert.alert(
+                  '🔐 Confirm Payment',
+                  `Submit ${fmtKES(numAmount)} to ${recipientName}?\n\nThis will be sent for Checker → Director approval.`,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Submit', onPress: () => mutation.mutate() },
+                  ]
+                );
+              }}
+            >
+              <LinearGradient colors={['#059669', '#047857']} style={s.nextBtnInner}>
+                {mutation.isPending
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={s.nextBtnText}>🚀 Submit for Approval</Text>}
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      {/* Supplier search modal */}
+      <Modal visible={supplierOpen} animationType="slide" transparent onRequestClose={() => setSupplierOpen(false)}>
+        <View style={s.suppModal}>
+          <View style={s.suppModalContent}>
+            <View style={s.suppModalHandle} />
+            <Text style={s.suppModalTitle}>Select Supplier</Text>
+            <TextInput
+              style={s.suppSearch}
+              value={supplierSearch}
+              onChangeText={setSupplierSearch}
+              placeholder="Search by name, phone, account..."
+              placeholderTextColor="#475569"
+              autoFocus
+            />
+            <ScrollView style={s.suppList}>
+              {(supplierData ?? []).length === 0 ? (
+                <View style={s.suppEmpty}>
+                  <Text style={s.suppEmptyText}>No suppliers found</Text>
+                  <Text style={s.suppEmptySub}>Add suppliers via the web portal</Text>
+                </View>
+              ) : (supplierData ?? []).map((sup: any) => (
+                <TouchableOpacity key={sup.id} style={s.suppItem} onPress={() => selectSupplier(sup)}>
+                  <Text style={s.suppItemEmoji}>{sup.type === 'MPESA_B2C' ? '📱' : sup.type?.startsWith('MPESA') ? '🏦' : '🏛️'}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.suppItemName}>{sup.name}</Text>
+                    <Text style={s.suppItemSub}>{sup.phone ?? sup.paybillNumber ?? sup.accountNumber ?? '—'} · {sup.type}</Text>
+                  </View>
+                  <Text style={{ color: '#6366f1', fontSize: 18 }}>→</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={s.suppClose} onPress={() => setSupplierOpen(false)}>
+              <Text style={s.suppCloseText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f172a' },
-  content: { padding: 16, paddingBottom: 40 },
-  pageTitle: { color: '#f1f5f9', fontSize: 24, fontWeight: '800', marginBottom: 4 },
-  pageSubtitle: { color: '#64748b', fontSize: 13, marginBottom: 20 },
-  back: { color: '#6366f1', fontSize: 13, fontWeight: '600', marginBottom: 12 },
-  railBadge: {
-    alignSelf: 'flex-start', backgroundColor: '#1e293b', borderRadius: 10,
-    paddingHorizontal: 12, paddingVertical: 6, color: '#a5b4fc',
-    fontSize: 13, fontWeight: '600', marginBottom: 20,
-  },
-  railsGrid: { gap: 10, marginBottom: 24 },
-  railCard: {
-    backgroundColor: '#1e293b', borderRadius: 16, padding: 16,
-    borderWidth: 1, borderColor: '#334155',
-  },
-  railCardActive: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
-  railIcon: { fontSize: 24, marginBottom: 6 },
-  railLabel: { color: '#f1f5f9', fontSize: 15, fontWeight: '700' },
-  railDesc: { color: '#64748b', fontSize: 12, marginTop: 2 },
-  nextBtn: {
-    backgroundColor: '#4f46e5', borderRadius: 16, paddingVertical: 16,
-    alignItems: 'center', marginTop: 8,
-  },
-  nextBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  label: { color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
-  input: {
-    backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155',
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
-    color: '#f1f5f9', fontSize: 15,
-  },
-  amountInput: { fontSize: 28, fontWeight: '800', color: '#6366f1', marginBottom: 14 },
-  walletChip: {
-    backgroundColor: '#1e293b', borderRadius: 10, paddingHorizontal: 14,
-    paddingVertical: 8, marginRight: 8, borderWidth: 1, borderColor: '#334155',
-  },
-  walletChipActive: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
-  walletChipText: { color: '#94a3b8', fontSize: 12, fontWeight: '600' },
-  infoBox: {
-    backgroundColor: '#1e3a5f', borderRadius: 12, padding: 12, marginBottom: 16,
-    borderWidth: 1, borderColor: '#1d4ed8',
-  },
-  infoText: { color: '#93c5fd', fontSize: 12, lineHeight: 18 },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0a0f1e' },
+  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  backBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: '#ffffff15', alignItems: 'center', justifyContent: 'center' },
+  backText: { color: '#fff', fontSize: 20 },
+  headerTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '700' },
+  headerSub: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  stepDots: { flexDirection: 'row', gap: 6 },
+  stepDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#334155' },
+  stepDotActive: { backgroundColor: '#6366f1' },
+  body: { flex: 1 },
+  stepContent: { padding: 16 },
+  stepTitle: { color: '#f1f5f9', fontSize: 20, fontWeight: '800', marginBottom: 20 },
+
+  section: { marginBottom: 16 },
+  sLabel: { color: '#475569', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+
+  supplierPickerBtn: { backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1, borderColor: '#334155', padding: 14 },
+  supplierPickerText: { color: '#94a3b8', fontSize: 14 },
+
+  railGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  railBtn: { width: '30.5%', alignItems: 'center', padding: 12, borderRadius: 14, backgroundColor: '#1e293b', borderWidth: 1.5, borderColor: '#334155', gap: 4 },
+  railBtnLabel: { color: '#64748b', fontSize: 11, fontWeight: '600', textAlign: 'center' },
+
+  walletChip: { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: '#334155', minWidth: 140 },
+  walletChipActive: { borderColor: '#6366f1', backgroundColor: '#1e1b4b' },
+  walletChipName: { color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 4 },
+  walletChipBal: { color: '#f1f5f9', fontSize: 14, fontWeight: '800' },
+
+  textInput: { backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1, borderColor: '#334155', padding: 14, color: '#f1f5f9', fontSize: 15 },
+
+  amountBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 20, borderWidth: 1, borderColor: '#4f46e5', padding: 20, marginBottom: 16 },
+  amountPrefix: { color: '#475569', fontSize: 22, fontWeight: '700', marginRight: 10 },
+  amountInput: { flex: 1, color: '#f1f5f9', fontSize: 36, fontWeight: '900' },
+
+  breakdown: { backgroundColor: '#1e293b', borderRadius: 16, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  breakdownRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5 },
+  breakdownLabel: { color: '#64748b', fontSize: 13 },
+  breakdownValue: { color: '#f1f5f9', fontSize: 14, fontWeight: '700' },
+  insufficientText: { color: '#f59e0b', fontSize: 12, marginTop: 8 },
+
+  summaryCard: { backgroundColor: '#1e293b', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#334155', marginBottom: 16 },
+  summaryTitle: { color: '#64748b', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 10 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#334155' },
+  summaryLabel: { color: '#64748b', fontSize: 13 },
+  summaryValue: { color: '#f1f5f9', fontSize: 13, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
+
+  nextBtn: { marginTop: 8 },
+  nextBtnInner: { borderRadius: 16, height: 56, alignItems: 'center', justifyContent: 'center' },
+  nextBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+
+  successCircle: { width: 100, height: 100, borderRadius: 50, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
+  successTitle: { color: '#f1f5f9', fontSize: 26, fontWeight: '800', marginBottom: 8 },
+  successRef: { color: '#6366f1', fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginBottom: 8 },
+  successSub: { color: '#64748b', fontSize: 14, marginBottom: 32, textAlign: 'center' },
+  successBtns: { width: '100%', padding: 24, gap: 12 },
+  successBtnPrimary: { backgroundColor: '#4f46e5', borderRadius: 16, height: 52, alignItems: 'center', justifyContent: 'center' },
+  successBtnPrimaryText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  successBtnSecondary: { backgroundColor: '#1e293b', borderRadius: 16, height: 52, alignItems: 'center', justifyContent: 'center' },
+  successBtnSecondaryText: { color: '#94a3b8', fontSize: 16, fontWeight: '600' },
+
+  suppModal: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.7)' },
+  suppModalContent: { backgroundColor: '#0f172a', borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%', borderWidth: 1, borderColor: '#1e293b' },
+  suppModalHandle: { width: 40, height: 4, backgroundColor: '#334155', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 16 },
+  suppModalTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '700', paddingHorizontal: 16, marginBottom: 12 },
+  suppSearch: { backgroundColor: '#1e293b', borderRadius: 12, margin: 16, marginTop: 0, padding: 14, color: '#f1f5f9', fontSize: 15, borderWidth: 1, borderColor: '#334155' },
+  suppList: { maxHeight: 380, paddingHorizontal: 16 },
+  suppItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
+  suppItemEmoji: { fontSize: 24, width: 36, textAlign: 'center' },
+  suppItemName: { color: '#f1f5f9', fontSize: 14, fontWeight: '600' },
+  suppItemSub: { color: '#64748b', fontSize: 12, marginTop: 2 },
+  suppEmpty: { alignItems: 'center', padding: 40 },
+  suppEmptyText: { color: '#f1f5f9', fontSize: 16, fontWeight: '600' },
+  suppEmptySub: { color: '#475569', fontSize: 13, marginTop: 6 },
+  suppClose: { margin: 16, backgroundColor: '#1e293b', borderRadius: 14, height: 50, alignItems: 'center', justifyContent: 'center' },
+  suppCloseText: { color: '#94a3b8', fontSize: 15, fontWeight: '600' },
 });
