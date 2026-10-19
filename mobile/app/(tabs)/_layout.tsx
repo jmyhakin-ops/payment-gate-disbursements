@@ -120,6 +120,20 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="users"
+        options={{
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name="people"
+              outlineName="people-outline"
+              label="Team"
+              focused={focused}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           tabBarIcon: ({ focused, color }) => (

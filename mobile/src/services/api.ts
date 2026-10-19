@@ -109,6 +109,18 @@ export const settingsApi = {
     apiClient.get('/settings', { params: { section: 'configured-rails' } }),
 };
 
+// ─── Users ────────────────────────────────────────────────────────────────────
+export const usersApi = {
+  /** List all users — reads from web app (same Supabase DB) */
+  list: (params?: Record<string, any>) => apiClient.get('/users', { params }),
+  /** Suspend a user */
+  suspend: (userId: string) => apiClient.put(`/users?userId=${userId}&action=suspend`),
+  /** Activate a user */
+  activate: (userId: string) => apiClient.put(`/users?userId=${userId}&action=activate`),
+  /** Change a user's role */
+  changeRole: (userId: string, role: string) => apiClient.put(`/users?userId=${userId}`, { role }),
+};
+
 // ─── Notifications ────────────────────────────────────────────────────────────
 export const notificationsApi = {
   list: (params?: Record<string, any>) => apiClient.get('/users/notifications', { params }),
