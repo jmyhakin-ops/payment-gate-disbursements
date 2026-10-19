@@ -6,8 +6,9 @@ import {
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
-import { paymentsApi } from '../../services/api';
-import { useAuthStore } from '../../store/auth.store';
+import { Ionicons } from '@expo/vector-icons';
+import { paymentsApi } from '../services/api';
+import { useAuthStore } from '../store/auth.store';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const W = Dimensions.get('window').width;
@@ -23,12 +24,24 @@ function timeAgo(d: string) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-const RAIL_EMOJI: Record<string, string> = {
-  MPESA_B2C: '📱', MPESA_B2B_PAYBILL: '🏦', MPESA_B2B_TILL: '🛒',
-  PESALINK: '🏛️', RTGS: '💸', EQUITY_JENGA: '⚡', KCB_OPEN_BANKING: '🔑',
+const RAIL_ICON: Record<string, string> = {
+  MPESA_B2C: 'phone-portrait',
+  MPESA_B2B_PAYBILL: 'business',
+  MPESA_B2B_TILL: 'cart',
+  PESALINK: 'swap-horizontal',
+  RTGS: 'library',
+  EQUITY_JENGA: 'flash',
+  KCB_OPEN_BANKING: 'key',
 };
 
-// ─── Director Approval Modal ───────────────────────────────────────────────
+// ─── Checker Queue roles ──────────────────────────────────────────────────────
+const CHECKER_ROLES = ['CHECKER', 'FINANCE_MANAGER', 'ORG_ADMIN', 'SUPER_ADMIN'];
+// ─── Director Sign-off roles ──────────────────────────────────────────────────
+const DIRECTOR_ROLES = ['DIRECTOR', 'ORG_ADMIN', 'SUPER_ADMIN'];
+
+// ────────────────────────────────────────────────────────────────────────────
+// DIRECTOR APPROVAL MODAL — Full amount OR custom amount + PIN
+// ────────────────────────────────────────────────────────────────────────────
 function DirectorApprovalModal({
   visible, payment, onClose, onSubmit, loading,
 }: {
@@ -43,15 +56,15 @@ function DirectorApprovalModal({
   const [reason, setReason] = useState('');
   const [useCustomAmount, setUseCustomAmount] = useState(false);
   const [customAmount, setCustomAmount] = useState('');
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(300)).current;
 
   React.useEffect(() => {
     if (visible) {
       setMode('approve'); setPin(''); setReason('');
       setUseCustomAmount(false); setCustomAmount('');
-      Animated.spring(slideAnim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 9 }).start();
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 70, friction: 10 }).start();
     } else {
-      Animated.timing(slideAnim, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+      Animated.timing(slideAnim, { toValue: 300, duration: 220, useNativeDriver: true }).start();
     }
   }, [visible]);
 
@@ -60,127 +73,151 @@ function DirectorApprovalModal({
   const requestedAmt = Number(payment.amount ?? 0);
   const parsedCustom = parseFloat(customAmount.replace(/,/g, ''));
   const finalAmount = useCustomAmount && !isNaN(parsedCustom) && parsedCustom > 0 ? parsedCustom : requestedAmt;
-
   const canSubmit = pin.length >= 4 && (mode === 'approve' || reason.trim().length > 5);
+  const customExceedsRequested = useCustomAmount && parsedCustom > requestedAmt;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={s.modalOverlay}>
-        <Animated.View style={[s.modalSheet, {
-          transform: [{ translateY: slideAnim.interpolate({ inputRange: [0, 1], outputRange: [400, 0] }) }],
-        }]}>
-          {/* Handle bar */}
-          <View style={s.modalHandle} />
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <View style={s.overlay}>
+        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }] }]}>
+          <View style={s.handle} />
 
-          {/* Header */}
+          {/* Header gradient */}
           <LinearGradient
-            colors={mode === 'approve' ? ['#1a3a2a', '#0f2d1e'] : ['#3a1a1a', '#2d0f0f']}
-            style={s.modalHeader}
+            colors={mode === 'approve' ? ['#0c2340', '#0f3460'] : ['#2d0f1e', '#3a0d1a']}
+            style={s.sheetHeader}
           >
-            <Text style={s.modalHeaderEmoji}>{mode === 'approve' ? '🛡️' : '❌'}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.modalHeaderTitle}>
-                {mode === 'approve' ? 'Authorize Payment' : 'Reject Payment'}
-              </Text>
-              <Text style={s.modalHeaderRef}>{payment.reference}</Text>
+            <View style={[s.sheetHeaderIcon, { backgroundColor: mode === 'approve' ? '#1e40af' : '#9f1239' }]}>
+              <Ionicons name={mode === 'approve' ? 'shield-checkmark' : 'close-circle'} size={26} color="#fff" />
             </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.sheetHeaderTitle}>
+                {mode === 'approve' ? 'Director Authorization' : 'Reject Payment'}
+              </Text>
+              <Text style={s.sheetHeaderRef} numberOfLines={1}>{payment.reference}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={s.sheetCloseBtn}>
+              <Ionicons name="close" size={20} color="#94a3b8" />
+            </TouchableOpacity>
           </LinearGradient>
 
-          <ScrollView style={s.modalBody} showsVerticalScrollIndicator={false}>
-            {/* Payment summary */}
-            <View style={s.paymentSummaryBox}>
+          <ScrollView style={s.sheetBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+
+            {/* Payment summary card */}
+            <View style={s.summaryCard}>
               <View style={s.summaryRow}>
                 <Text style={s.summaryLabel}>Recipient</Text>
                 <Text style={s.summaryValue} numberOfLines={1}>{payment.recipientName ?? '—'}</Text>
               </View>
               <View style={s.summaryRow}>
-                <Text style={s.summaryLabel}>Rail</Text>
-                <Text style={s.summaryValue}>
-                  {RAIL_EMOJI[payment.rail] ?? '💳'} {payment.rail?.replace(/_/g, ' ')}
-                </Text>
+                <Text style={s.summaryLabel}>Payment Rail</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name={(RAIL_ICON[payment.rail] ?? 'card') as any} size={14} color="#6366f1" />
+                  <Text style={s.summaryValue}>{payment.rail?.replace(/_/g, ' ')}</Text>
+                </View>
               </View>
               <View style={s.summaryRow}>
                 <Text style={s.summaryLabel}>Requested</Text>
-                <Text style={[s.summaryValue, { color: '#f59e0b', fontWeight: '800' }]}>
+                <Text style={[s.summaryValue, { color: '#f59e0b', fontWeight: '800', fontSize: 16 }]}>
                   {formatKES(requestedAmt)}
                 </Text>
               </View>
-              <View style={[s.summaryRow, { borderBottomWidth: 0, paddingBottom: 0 }]}>
-                <Text style={s.summaryLabel}>Maker</Text>
-                <Text style={s.summaryValue}>
-                  {payment.maker?.firstName} {payment.maker?.lastName}
-                </Text>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLabel}>Submitted by</Text>
+                <Text style={s.summaryValue}>{payment.maker?.firstName} {payment.maker?.lastName}</Text>
               </View>
+              {payment.checkerNote && (
+                <View style={[s.summaryRow, { borderBottomWidth: 0 }]}>
+                  <Text style={s.summaryLabel}>Checker Note</Text>
+                  <Text style={[s.summaryValue, { color: '#22d3ee', maxWidth: '65%' }]} numberOfLines={2}>
+                    {payment.checkerNote}
+                  </Text>
+                </View>
+              )}
             </View>
 
-            {/* APPROVE mode extras */}
+            {/* ── APPROVE MODE ── */}
             {mode === 'approve' && (
               <>
-                {/* Amount options */}
-                <Text style={s.sectionLabel}>AUTHORIZED AMOUNT</Text>
-                <View style={s.amountOptionsRow}>
+                {/* Amount selector */}
+                <Text style={s.fieldLabel}>AUTHORIZED AMOUNT</Text>
+                <View style={s.amountToggleRow}>
                   <TouchableOpacity
-                    style={[s.amountOption, !useCustomAmount && s.amountOptionActive]}
+                    style={[s.amountToggleBtn, !useCustomAmount && s.amountToggleBtnActive]}
                     onPress={() => setUseCustomAmount(false)}
+                    activeOpacity={0.8}
                   >
-                    <Text style={[s.amountOptionLabel, !useCustomAmount && s.amountOptionLabelActive]}>
-                      Full Amount
-                    </Text>
-                    <Text style={[s.amountOptionValue, !useCustomAmount && { color: '#10b981' }]}>
+                    <Ionicons name="checkmark-circle" size={18} color={!useCustomAmount ? '#10b981' : '#475569'} />
+                    <Text style={[s.amountToggleLabel, !useCustomAmount && { color: '#10b981' }]}>Full Amount</Text>
+                    <Text style={[s.amountToggleValue, !useCustomAmount && { color: '#10b981' }]}>
                       {formatKES(requestedAmt)}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[s.amountOption, useCustomAmount && s.amountOptionActive]}
+                    style={[s.amountToggleBtn, useCustomAmount && s.amountToggleBtnActive]}
                     onPress={() => setUseCustomAmount(true)}
+                    activeOpacity={0.8}
                   >
-                    <Text style={[s.amountOptionLabel, useCustomAmount && s.amountOptionLabelActive]}>
-                      Custom Amount
-                    </Text>
-                    <Text style={[s.amountOptionValue, useCustomAmount && { color: '#10b981' }]}>
-                      {useCustomAmount && parsedCustom > 0 ? formatKES(parsedCustom) : 'Set amount →'}
+                    <Ionicons name="create-outline" size={18} color={useCustomAmount ? '#10b981' : '#475569'} />
+                    <Text style={[s.amountToggleLabel, useCustomAmount && { color: '#10b981' }]}>Custom Amount</Text>
+                    <Text style={[s.amountToggleValue, useCustomAmount && { color: '#10b981' }]}>
+                      {useCustomAmount && parsedCustom > 0 ? formatKES(parsedCustom) : 'Enter amount →'}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
                 {useCustomAmount && (
-                  <View style={s.customAmtBox}>
-                    <Text style={s.inputLabel}>Enter Amount to Approve (KES)</Text>
-                    <View style={s.customAmtRow}>
-                      <Text style={s.currencyPrefix}>KES</Text>
+                  <View style={s.customAmtCard}>
+                    <Text style={s.fieldLabel}>ENTER AMOUNT TO APPROVE (KES)</Text>
+                    <View style={s.customAmtInputRow}>
+                      <Text style={s.kesCurrency}>KES</Text>
                       <TextInput
                         style={s.customAmtInput}
                         value={customAmount}
                         onChangeText={setCustomAmount}
                         keyboardType="decimal-pad"
                         placeholder="0.00"
-                        placeholderTextColor="#475569"
+                        placeholderTextColor="#334155"
                         autoFocus
                       />
                     </View>
-                    {parsedCustom > requestedAmt && (
-                      <Text style={s.amtWarning}>⚠️ Custom amount exceeds requested amount</Text>
+                    {customExceedsRequested && (
+                      <View style={s.warningRow}>
+                        <Ionicons name="warning" size={14} color="#f59e0b" />
+                        <Text style={s.warningText}>Custom amount exceeds requested amount</Text>
+                      </View>
                     )}
-                    {parsedCustom > 0 && parsedCustom < requestedAmt && (
-                      <Text style={s.amtInfo}>
-                        ℹ️ Approving {formatKES(parsedCustom)} of {formatKES(requestedAmt)} requested
-                      </Text>
+                    {!isNaN(parsedCustom) && parsedCustom > 0 && parsedCustom < requestedAmt && (
+                      <View style={s.infoRow}>
+                        <Ionicons name="information-circle" size={14} color="#60a5fa" />
+                        <Text style={s.infoText}>
+                          Approving {formatKES(parsedCustom)} of {formatKES(requestedAmt)} requested.
+                          Excess will be released back to wallet.
+                        </Text>
+                      </View>
                     )}
                   </View>
                 )}
 
-                {/* Final approval box */}
-                <View style={s.finalApprovalBox}>
-                  <Text style={s.finalApprovalLabel}>FINAL AUTHORIZED AMOUNT</Text>
-                  <Text style={s.finalApprovalAmount}>{formatKES(finalAmount)}</Text>
-                </View>
+                {/* Final amount box */}
+                <LinearGradient colors={['#042f2e', '#064e3b']} style={s.finalAmtBox}>
+                  <Text style={s.finalAmtLabel}>FINAL AUTHORIZED AMOUNT</Text>
+                  <Text style={s.finalAmtValue}>{formatKES(finalAmount)}</Text>
+                  {useCustomAmount && parsedCustom > 0 && parsedCustom !== requestedAmt && (
+                    <Text style={s.finalAmtNote}>
+                      {parsedCustom < requestedAmt
+                        ? `↓ Partial — KES ${(requestedAmt - parsedCustom).toLocaleString()} released back`
+                        : `↑ Exceeds requested by KES ${(parsedCustom - requestedAmt).toLocaleString()}`}
+                    </Text>
+                  )}
+                </LinearGradient>
               </>
             )}
 
-            {/* REJECT reason */}
+            {/* ── REJECT MODE ── */}
             {mode === 'reject' && (
               <>
-                <Text style={s.sectionLabel}>REJECTION REASON *</Text>
+                <Text style={s.fieldLabel}>REJECTION REASON *</Text>
                 <TextInput
                   style={s.reasonInput}
                   value={reason}
@@ -191,14 +228,24 @@ function DirectorApprovalModal({
                   numberOfLines={3}
                   textAlignVertical="top"
                 />
+                {reason.trim().length > 0 && reason.trim().length <= 5 && (
+                  <Text style={s.warningText}>Please provide a more detailed reason (min 6 chars)</Text>
+                )}
               </>
             )}
 
-            {/* PIN */}
-            <Text style={s.sectionLabel}>DIRECTOR PIN *</Text>
-            <View style={s.pinDots}>
-              {[0, 1, 2, 3, 4, 5].map(i => (
-                <View key={i} style={[s.pinDot, pin.length > i && s.pinDotFilled]} />
+            {/* Director PIN */}
+            <Text style={s.fieldLabel}>DIRECTOR PIN *</Text>
+            <View style={s.pinDotsRow}>
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <View
+                  key={i}
+                  style={[
+                    s.pinDot,
+                    pin.length > i && s.pinDotFilled,
+                    pin.length === i && s.pinDotCurrent,
+                  ]}
+                />
               ))}
             </View>
             <TextInput
@@ -206,32 +253,34 @@ function DirectorApprovalModal({
               value={pin}
               onChangeText={setPin}
               placeholder="Enter your 4–6 digit PIN"
-              placeholderTextColor="#475569"
+              placeholderTextColor="#334155"
               secureTextEntry
               keyboardType="numeric"
               maxLength={6}
               textAlign="center"
             />
 
-            {/* Mode toggle */}
-            <View style={s.modeToggleRow}>
+            {/* Approve / Reject toggle */}
+            <View style={s.modeRow}>
               <TouchableOpacity
-                style={[s.modeBtn, mode === 'approve' && s.modeBtnActive]}
+                style={[s.modeBtn, mode === 'approve' && s.modeBtnApprove]}
                 onPress={() => setMode('approve')}
               >
-                <Text style={[s.modeBtnText, mode === 'approve' && { color: '#10b981' }]}>✓ Approve</Text>
+                <Ionicons name="checkmark" size={16} color={mode === 'approve' ? '#10b981' : '#475569'} />
+                <Text style={[s.modeBtnText, mode === 'approve' && { color: '#10b981' }]}>Approve</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[s.modeBtn, mode === 'reject' && s.modeBtnRejectActive]}
+                style={[s.modeBtn, mode === 'reject' && s.modeBtnReject]}
                 onPress={() => setMode('reject')}
               >
-                <Text style={[s.modeBtnText, mode === 'reject' && { color: '#ef4444' }]}>✗ Reject</Text>
+                <Ionicons name="close" size={16} color={mode === 'reject' ? '#ef4444' : '#475569'} />
+                <Text style={[s.modeBtnText, mode === 'reject' && { color: '#ef4444' }]}>Reject</Text>
               </TouchableOpacity>
             </View>
           </ScrollView>
 
-          {/* Footer actions */}
-          <View style={s.modalFooter}>
+          {/* Footer */}
+          <View style={s.sheetFooter}>
             <TouchableOpacity style={s.cancelBtn} onPress={onClose}>
               <Text style={s.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
@@ -239,20 +288,28 @@ function DirectorApprovalModal({
               style={[
                 s.submitBtn,
                 mode === 'approve' ? s.submitBtnApprove : s.submitBtnReject,
-                !canSubmit && { opacity: 0.4 },
+                (!canSubmit || customExceedsRequested) && { opacity: 0.4 },
               ]}
-              disabled={!canSubmit || loading}
+              disabled={!canSubmit || loading || customExceedsRequested}
               onPress={() => {
                 const amt = useCustomAmount && parsedCustom > 0 ? parsedCustom : undefined;
                 onSubmit(payment.id, mode, pin, reason, amt);
               }}
             >
-              {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={s.submitBtnText}>
-                    {mode === 'approve' ? '🛡️ Authorize' : '❌ Reject'}
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons
+                    name={mode === 'approve' ? 'shield-checkmark' : 'close-circle'}
+                    size={18}
+                    color="#fff"
+                  />
+                  <Text style={s.submitBtnText}>
+                    {mode === 'approve' ? 'Authorize Payment' : 'Reject Payment'}
                   </Text>
-              }
+                </>
+              )}
             </TouchableOpacity>
           </View>
         </Animated.View>
@@ -261,7 +318,9 @@ function DirectorApprovalModal({
   );
 }
 
-// ─── Checker Approval Modal ────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// CHECKER MODAL — Manager reviews maker's payment
+// ────────────────────────────────────────────────────────────────────────────
 function CheckerModal({
   visible, payment, onClose, onSubmit, loading,
 }: {
@@ -273,68 +332,131 @@ function CheckerModal({
 }) {
   const [mode, setMode] = useState<'approve' | 'reject'>('approve');
   const [reason, setReason] = useState('');
+  const [note, setNote] = useState('');
+  const slideAnim = useRef(new Animated.Value(300)).current;
 
   React.useEffect(() => {
-    if (visible) { setMode('approve'); setReason(''); }
+    if (visible) {
+      setMode('approve'); setReason(''); setNote('');
+      Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 70, friction: 10 }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: 300, duration: 220, useNativeDriver: true }).start();
+    }
   }, [visible]);
 
   if (!payment) return null;
+  const canSubmit = mode === 'approve' || reason.trim().length > 5;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={s.modalOverlay}>
-        <View style={[s.modalSheet, { maxHeight: '75%' }]}>
-          <View style={s.modalHandle} />
+    <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
+      <View style={s.overlay}>
+        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }] }]}>
+          <View style={s.handle} />
+
           <LinearGradient
-            colors={mode === 'approve' ? ['#1a3a2a', '#0f2d1e'] : ['#3a1a1a', '#2d0f0f']}
-            style={s.modalHeader}
+            colors={mode === 'approve' ? ['#0c2340', '#0f3460'] : ['#2d0f1e', '#3a0d1a']}
+            style={s.sheetHeader}
           >
-            <Text style={s.modalHeaderEmoji}>{mode === 'approve' ? '✅' : '❌'}</Text>
-            <View style={{ flex: 1 }}>
-              <Text style={s.modalHeaderTitle}>Checker Review</Text>
-              <Text style={s.modalHeaderRef}>{payment.reference}</Text>
+            <View style={[s.sheetHeaderIcon, { backgroundColor: mode === 'approve' ? '#1d4ed8' : '#be123c' }]}>
+              <Ionicons name={mode === 'approve' ? 'checkmark-circle' : 'close-circle'} size={26} color="#fff" />
             </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.sheetHeaderTitle}>Checker Review</Text>
+              <Text style={s.sheetHeaderRef}>{payment.reference}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={s.sheetCloseBtn}>
+              <Ionicons name="close" size={20} color="#94a3b8" />
+            </TouchableOpacity>
           </LinearGradient>
 
-          <View style={s.paymentSummaryBox}>
-            <View style={s.summaryRow}>
-              <Text style={s.summaryLabel}>To</Text>
-              <Text style={s.summaryValue}>{payment.recipientName ?? '—'}</Text>
-            </View>
-            <View style={[s.summaryRow, { borderBottomWidth: 0 }]}>
-              <Text style={s.summaryLabel}>Amount</Text>
-              <Text style={[s.summaryValue, { color: '#10b981', fontWeight: '800', fontSize: 18 }]}>
-                {formatKES(Number(payment.amount))}
-              </Text>
-            </View>
-          </View>
+          <ScrollView style={s.sheetBody} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
-          {mode === 'reject' && (
-            <View style={{ paddingHorizontal: 16, marginBottom: 12 }}>
-              <Text style={s.sectionLabel}>REJECTION REASON *</Text>
-              <TextInput
-                style={s.reasonInput}
-                value={reason}
-                onChangeText={setReason}
-                placeholder="State reason..."
-                placeholderTextColor="#475569"
-                multiline numberOfLines={3}
-                textAlignVertical="top"
-                autoFocus
-              />
+            {/* Summary */}
+            <View style={s.summaryCard}>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLabel}>To</Text>
+                <Text style={s.summaryValue}>{payment.recipientName ?? '—'}</Text>
+              </View>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLabel}>Rail</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name={(RAIL_ICON[payment.rail] ?? 'card') as any} size={14} color="#6366f1" />
+                  <Text style={s.summaryValue}>{payment.rail?.replace(/_/g, ' ')}</Text>
+                </View>
+              </View>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLabel}>Amount</Text>
+                <Text style={[s.summaryValue, { color: '#10b981', fontWeight: '800', fontSize: 18 }]}>
+                  {formatKES(Number(payment.amount))}
+                </Text>
+              </View>
+              <View style={[s.summaryRow, { borderBottomWidth: 0 }]}>
+                <Text style={s.summaryLabel}>Maker</Text>
+                <Text style={s.summaryValue}>{payment.maker?.firstName} {payment.maker?.lastName}</Text>
+              </View>
             </View>
-          )}
 
-          <View style={s.modeToggleRow}>
-            <TouchableOpacity style={[s.modeBtn, mode === 'approve' && s.modeBtnActive]} onPress={() => setMode('approve')}>
-              <Text style={[s.modeBtnText, mode === 'approve' && { color: '#10b981' }]}>✓ Approve</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[s.modeBtn, mode === 'reject' && s.modeBtnRejectActive]} onPress={() => setMode('reject')}>
-              <Text style={[s.modeBtnText, mode === 'reject' && { color: '#ef4444' }]}>✗ Reject</Text>
-            </TouchableOpacity>
-          </View>
+            {/* Description */}
+            {payment.description && (
+              <View style={s.descCard}>
+                <Text style={s.fieldLabel}>PAYMENT PURPOSE</Text>
+                <Text style={s.descText}>"{payment.description}"</Text>
+              </View>
+            )}
 
-          <View style={s.modalFooter}>
+            {/* Checker note (optional) */}
+            <Text style={s.fieldLabel}>YOUR NOTE (optional)</Text>
+            <TextInput
+              style={[s.noteInput]}
+              value={note}
+              onChangeText={setNote}
+              placeholder="Add a note for the Director..."
+              placeholderTextColor="#475569"
+              multiline
+              numberOfLines={2}
+              textAlignVertical="top"
+            />
+
+            {/* Rejection reason */}
+            {mode === 'reject' && (
+              <>
+                <Text style={s.fieldLabel}>REJECTION REASON *</Text>
+                <TextInput
+                  style={s.reasonInput}
+                  value={reason}
+                  onChangeText={setReason}
+                  placeholder="State a clear reason for rejection..."
+                  placeholderTextColor="#475569"
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                  autoFocus
+                />
+              </>
+            )}
+
+            {/* Mode toggle */}
+            <View style={s.modeRow}>
+              <TouchableOpacity
+                style={[s.modeBtn, mode === 'approve' && s.modeBtnApprove]}
+                onPress={() => setMode('approve')}
+              >
+                <Ionicons name="checkmark" size={16} color={mode === 'approve' ? '#10b981' : '#475569'} />
+                <Text style={[s.modeBtnText, mode === 'approve' && { color: '#10b981' }]}>
+                  Approve to Director
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[s.modeBtn, mode === 'reject' && s.modeBtnReject]}
+                onPress={() => setMode('reject')}
+              >
+                <Ionicons name="close" size={16} color={mode === 'reject' ? '#ef4444' : '#475569'} />
+                <Text style={[s.modeBtnText, mode === 'reject' && { color: '#ef4444' }]}>Reject</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+
+          <View style={s.sheetFooter}>
             <TouchableOpacity style={s.cancelBtn} onPress={onClose}>
               <Text style={s.cancelBtnText}>Cancel</Text>
             </TouchableOpacity>
@@ -342,29 +464,34 @@ function CheckerModal({
               style={[
                 s.submitBtn,
                 mode === 'approve' ? s.submitBtnApprove : s.submitBtnReject,
-                (mode === 'reject' && !reason.trim()) && { opacity: 0.4 },
+                !canSubmit && { opacity: 0.4 },
               ]}
-              disabled={loading || (mode === 'reject' && !reason.trim())}
-              onPress={() => onSubmit(payment.id, mode, reason)}
+              disabled={!canSubmit || loading}
+              onPress={() => onSubmit(payment.id, mode, mode === 'reject' ? reason : note)}
             >
-              {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={s.submitBtnText}>
-                    {mode === 'approve' ? '✅ Confirm Approve' : '❌ Confirm Reject'}
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name={mode === 'approve' ? 'arrow-forward-circle' : 'close-circle'} size={18} color="#fff" />
+                  <Text style={s.submitBtnText}>
+                    {mode === 'approve' ? 'Forward to Director' : 'Reject Payment'}
                   </Text>
-              }
+                </>
+              )}
             </TouchableOpacity>
           </View>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
 }
 
-// ─── Payment Card ──────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// PAYMENT CARD
+// ────────────────────────────────────────────────────────────────────────────
 function PaymentCard({ payment, isDirector, onPress }: { payment: any; isDirector: boolean; onPress: () => void }) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
-
   const handlePress = () => {
     Animated.sequence([
       Animated.timing(scaleAnim, { toValue: 0.97, duration: 80, useNativeDriver: true }),
@@ -373,57 +500,53 @@ function PaymentCard({ payment, isDirector, onPress }: { payment: any; isDirecto
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
   };
-
-  const railEmoji = RAIL_EMOJI[payment.rail] ?? '💳';
   const initials = ((payment.recipientName ?? '??').split(' ').map((w: string) => w[0]).join('').slice(0, 2)).toUpperCase();
+  const accentColor = isDirector ? '#7c3aed' : '#0ea5e9';
 
   return (
     <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
       <TouchableOpacity onPress={handlePress} activeOpacity={0.9}>
-        <View style={s.card}>
-          {/* Status strip */}
-          <View style={[s.cardStrip, isDirector ? { backgroundColor: '#7c3aed' } : { backgroundColor: '#0ea5e9' }]} />
-
-          <View style={s.cardInner}>
-            {/* Avatar + main info */}
+        <View style={[s.card, { borderColor: accentColor + '40' }]}>
+          <LinearGradient colors={[accentColor, accentColor + 'cc']} style={s.cardAccent} />
+          <View style={s.cardBody}>
             <View style={s.cardTopRow}>
-              <View style={s.avatar}>
-                <Text style={s.avatarText}>{initials}</Text>
-              </View>
+              <LinearGradient colors={isDirector ? ['#4c1d95', '#5b21b6'] : ['#075985', '#0369a1']} style={s.cardAvatar}>
+                <Text style={s.cardAvatarText}>{initials}</Text>
+              </LinearGradient>
               <View style={{ flex: 1 }}>
-                <Text style={s.cardRecipient} numberOfLines={1}>
+                <Text style={s.cardName} numberOfLines={1}>
                   {payment.recipientName ?? payment.recipientPhone ?? '—'}
                 </Text>
-                <Text style={s.cardSub}>
-                  {railEmoji} {payment.rail?.replace(/_/g, ' ')} · {timeAgo(payment.createdAt)}
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 }}>
+                  <Ionicons name={(RAIL_ICON[payment.rail] ?? 'card') as any} size={12} color="#64748b" />
+                  <Text style={s.cardSub}>{payment.rail?.replace(/_/g, ' ')} · {timeAgo(payment.createdAt)}</Text>
+                </View>
               </View>
-              <View style={s.cardAmountBox}>
-                <Text style={s.cardAmount}>{formatKES(Number(payment.amount))}</Text>
-                <View style={[s.rolePill, isDirector ? s.rolePillDirector : s.rolePillChecker]}>
-                  <Text style={s.rolePillText}>{isDirector ? 'Director' : 'Checker'}</Text>
+              <View style={{ alignItems: 'flex-end', gap: 5 }}>
+                <Text style={[s.cardAmount, { color: accentColor }]}>{formatKES(Number(payment.amount))}</Text>
+                <View style={[s.rolePill, { backgroundColor: accentColor + '25', borderColor: accentColor + '60', borderWidth: 1 }]}>
+                  <Text style={[s.rolePillText, { color: accentColor }]}>
+                    {isDirector ? '🛡️ Director' : '✅ Checker'}
+                  </Text>
                 </View>
               </View>
             </View>
 
-            {/* Description */}
             {payment.description && (
-              <View style={s.descRow}>
-                <Text style={s.descText} numberOfLines={1}>"{payment.description}"</Text>
+              <View style={s.cardDesc}>
+                <Text style={s.cardDescText} numberOfLines={1}>"{payment.description}"</Text>
               </View>
             )}
 
-            {/* Bottom meta */}
-            <View style={s.cardMeta}>
+            <View style={s.cardFooter}>
               <Text style={s.cardRef}>#{payment.reference}</Text>
-              <Text style={s.cardMaker}>
-                by {payment.maker?.firstName} {payment.maker?.lastName}
-              </Text>
+              <Text style={s.cardMaker}>by {payment.maker?.firstName} {payment.maker?.lastName}</Text>
             </View>
 
-            {/* CTA */}
-            <View style={[s.ctaRow, isDirector && { borderTopColor: '#3b1d7a' }]}>
-              <Text style={s.ctaText}>Tap to review →</Text>
+            <View style={[s.cardCta, { borderTopColor: accentColor + '30' }]}>
+              <Text style={[s.cardCtaText, { color: accentColor }]}>
+                {isDirector ? 'Tap to authorize →' : 'Tap to review & forward →'}
+              </Text>
             </View>
           </View>
         </View>
@@ -432,38 +555,54 @@ function PaymentCard({ payment, isDirector, onPress }: { payment: any; isDirecto
   );
 }
 
-// ─── Main Screen ───────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// MAIN APPROVALS SCREEN
+// ────────────────────────────────────────────────────────────────────────────
 export default function ApprovalsScreen() {
   const { user } = useAuthStore();
   const qc = useQueryClient();
-  const isDirector = ['DIRECTOR', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(user?.role ?? '');
-  const isChecker = ['CHECKER', 'FINANCE', 'ORG_ADMIN', 'SUPER_ADMIN'].includes(user?.role ?? '');
 
-  const [tab, setTab] = useState<'checker' | 'director'>(isDirector ? 'director' : 'checker');
+  const isChecker = CHECKER_ROLES.includes(user?.role ?? '');
+  const isDirector = DIRECTOR_ROLES.includes(user?.role ?? '');
+
+  // Default to checker tab if user has checker role, director tab if only director
+  const [tab, setTab] = useState<'checker' | 'director'>(
+    isChecker ? 'checker' : 'director'
+  );
   const [selectedPayment, setSelectedPayment] = useState<any>(null);
   const [directorModalOpen, setDirectorModalOpen] = useState(false);
   const [checkerModalOpen, setCheckerModalOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
+  // Checker queue — payments waiting for manager review
   const { data: checkerData, isLoading: checkerLoading, refetch: refetchChecker } = useQuery({
     queryKey: ['mobile-approvals-checker'],
-    queryFn: () => paymentsApi.pendingApprovals().then(r => r.data.data ?? []),
+    queryFn: () => paymentsApi.pendingApprovals().then((r) => r.data.data ?? []),
     enabled: isChecker,
-    refetchInterval: 30000,
+    refetchInterval: 30_000,
   });
 
+  // Director queue — payments already approved by checker, waiting for director
   const { data: directorData, isLoading: directorLoading, refetch: refetchDirector } = useQuery({
     queryKey: ['mobile-approvals-director'],
-    queryFn: () => paymentsApi.directorApprovals().then(r => r.data.data ?? []),
+    queryFn: () => paymentsApi.directorApprovals().then((r) => r.data.data ?? []),
     enabled: isDirector,
-    refetchInterval: 30000,
+    refetchInterval: 30_000,
   });
 
   const checkerMutation = useMutation({
     mutationFn: ({ id, action, reason }: any) => paymentsApi.checkerAction(id, action, reason),
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['mobile-approvals-checker'] });
+      qc.invalidateQueries({ queryKey: ['mobile-approvals-director'] });
       setCheckerModalOpen(false);
+      Alert.alert(
+        vars.action === 'approve' ? '✅ Forwarded to Director!' : '❌ Payment Rejected',
+        vars.action === 'approve'
+          ? 'Payment has been verified and sent to the Director for final authorization.'
+          : 'Payment has been rejected. The maker will be notified.',
+      );
     },
     onError: (e: any) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -477,12 +616,13 @@ export default function ApprovalsScreen() {
     onSuccess: (_, vars) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       qc.invalidateQueries({ queryKey: ['mobile-approvals-director'] });
+      qc.invalidateQueries({ queryKey: ['mobile-recent-tx'] });
       setDirectorModalOpen(false);
       Alert.alert(
         vars.action === 'approve' ? '🛡️ Payment Authorized!' : '❌ Payment Rejected',
         vars.action === 'approve'
-          ? 'The payment has been authorized and will be disbursed shortly.'
-          : 'The payment has been rejected and the maker has been notified.',
+          ? `Payment of ${vars.approvedAmount ? formatKES(vars.approvedAmount) : 'full amount'} has been authorized and will be disbursed shortly.`
+          : 'Payment has been rejected. The maker has been notified.',
       );
     },
     onError: (e: any) => {
@@ -491,65 +631,137 @@ export default function ApprovalsScreen() {
     },
   });
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await Promise.all([
+      isChecker ? refetchChecker() : Promise.resolve(),
+      isDirector ? refetchDirector() : Promise.resolve(),
+    ]);
+    setRefreshing(false);
+  };
+
   const payments = tab === 'director' ? (directorData ?? []) : (checkerData ?? []);
   const isLoading = tab === 'director' ? directorLoading : checkerLoading;
-  const refetch = tab === 'director' ? refetchDirector : refetchChecker;
-
   const checkerCount = checkerData?.length ?? 0;
   const directorCount = directorData?.length ?? 0;
 
   return (
-    <View style={s.container}>
+    <View style={s.root}>
       {/* Header */}
       <LinearGradient colors={['#0f172a', '#1e293b']} style={s.header}>
-        <Text style={s.headerTitle}>Approvals</Text>
-        <Text style={s.headerSub}>
-          {(checkerCount + directorCount)} pending action{(checkerCount + directorCount) !== 1 ? 's' : ''}
-        </Text>
-      </LinearGradient>
-
-      {/* Tabs */}
-      {isChecker && isDirector && (
-        <View style={s.tabBar}>
-          <TouchableOpacity style={[s.tab, tab === 'checker' && s.tabActive]} onPress={() => setTab('checker')}>
-            <Text style={[s.tabText, tab === 'checker' && s.tabTextActive]}>
-              Checker Queue {checkerCount > 0 ? `(${checkerCount})` : ''}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[s.tab, tab === 'director' && s.tabActive]} onPress={() => setTab('director')}>
-            <Text style={[s.tabText, tab === 'director' && s.tabTextActive]}>
-              Director Sign-off {directorCount > 0 ? `(${directorCount})` : ''}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Director warning */}
-      {tab === 'director' && (
-        <View style={s.directorBanner}>
-          <Text style={s.directorBannerText}>
-            🛡️ You are the FINAL authorizer. Payments approved here will be immediately disbursed to the recipient.
+        <View>
+          <Text style={s.headerTitle}>Approvals</Text>
+          <Text style={s.headerSub}>
+            {checkerCount + directorCount} pending · Auto-refreshes every 30s
           </Text>
         </View>
-      )}
+        {/* Role badges */}
+        <View style={{ flexDirection: 'row', gap: 6 }}>
+          {isChecker && (
+            <View style={s.roleBadge}>
+              <Ionicons name="checkmark-circle" size={12} color="#22d3ee" />
+              <Text style={[s.roleBadgeText, { color: '#22d3ee' }]}>Checker</Text>
+            </View>
+          )}
+          {isDirector && (
+            <View style={[s.roleBadge, { borderColor: '#a78bfa' }]}>
+              <Ionicons name="shield-checkmark" size={12} color="#a78bfa" />
+              <Text style={[s.roleBadgeText, { color: '#a78bfa' }]}>Director</Text>
+            </View>
+          )}
+        </View>
+      </LinearGradient>
 
-      {/* List */}
-      {isLoading ? (
-        <View style={s.centerLoader}>
+      {/* Tab switcher — always shown if user has either or both roles */}
+      <View style={s.tabRow}>
+        {isChecker && (
+          <TouchableOpacity
+            style={[s.tabBtn, tab === 'checker' && s.tabBtnCheckerActive]}
+            onPress={() => setTab('checker')}
+          >
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={16}
+              color={tab === 'checker' ? '#0ea5e9' : '#475569'}
+            />
+            <Text style={[s.tabBtnText, tab === 'checker' && s.tabBtnTextCheckerActive]}>
+              Checker Queue
+            </Text>
+            {checkerCount > 0 && (
+              <View style={s.tabBadge}>
+                <Text style={s.tabBadgeText}>{checkerCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+        {isDirector && (
+          <TouchableOpacity
+            style={[s.tabBtn, tab === 'director' && s.tabBtnDirectorActive]}
+            onPress={() => setTab('director')}
+          >
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={16}
+              color={tab === 'director' ? '#a78bfa' : '#475569'}
+            />
+            <Text style={[s.tabBtnText, tab === 'director' && s.tabBtnTextDirectorActive]}>
+              Director Sign-off
+            </Text>
+            {directorCount > 0 && (
+              <View style={[s.tabBadge, { backgroundColor: '#7c3aed' }]}>
+                <Text style={s.tabBadgeText}>{directorCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Info banner */}
+      <View style={[s.infoBanner,
+        tab === 'director'
+          ? { backgroundColor: '#1e1030', borderColor: '#7c3aed' }
+          : { backgroundColor: '#0c1c2e', borderColor: '#0ea5e9' }
+      ]}>
+        <Ionicons
+          name={tab === 'director' ? 'shield-checkmark' : 'checkmark-done'}
+          size={16}
+          color={tab === 'director' ? '#a78bfa' : '#38bdf8'}
+        />
+        <Text style={[s.infoBannerText, { color: tab === 'director' ? '#c4b5fd' : '#7dd3fc' }]}>
+          {tab === 'director'
+            ? '🛡️ Final authorization. Approved payments are immediately disbursed.'
+            : '✅ Checker queue. Verify payments and forward to Director for final sign-off.'}
+        </Text>
+      </View>
+
+      {/* Payment list */}
+      {isLoading && !refreshing ? (
+        <View style={s.loader}>
           <ActivityIndicator color="#6366f1" size="large" />
-          <Text style={s.loaderText}>Loading approvals...</Text>
+          <Text style={s.loaderText}>Loading {tab === 'director' ? 'director' : 'checker'} queue...</Text>
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={s.list}
           showsVerticalScrollIndicator={false}
-          refreshControl={<RefreshControl refreshing={false} onRefresh={refetch} tintColor="#6366f1" />}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6366f1" />
+          }
         >
           {payments.length === 0 ? (
             <View style={s.empty}>
-              <Text style={s.emptyEmoji}>🎉</Text>
-              <Text style={s.emptyTitle}>All caught up!</Text>
-              <Text style={s.emptySub}>No pending {tab === 'director' ? 'director ' : ''}approvals</Text>
+              <LinearGradient colors={['#1e293b', '#0f172a']} style={s.emptyIconBox}>
+                <Ionicons
+                  name={tab === 'director' ? 'shield-checkmark' : 'checkmark-done-circle'}
+                  size={48}
+                  color={tab === 'director' ? '#7c3aed' : '#0ea5e9'}
+                />
+              </LinearGradient>
+              <Text style={s.emptyTitle}>All caught up! 🎉</Text>
+              <Text style={s.emptySub}>
+                No pending {tab === 'director' ? 'director' : 'checker'} approvals right now.
+              </Text>
+              <Text style={s.emptySub2}>Pull down to refresh</Text>
             </View>
           ) : (
             payments.map((p: any) => (
@@ -591,120 +803,137 @@ export default function ApprovalsScreen() {
   );
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// STYLES
+// ────────────────────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0f1e' },
-  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 20 },
-  headerTitle: { color: '#f1f5f9', fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
-  headerSub: { color: '#64748b', fontSize: 13, marginTop: 2 },
-
-  tabBar: { flexDirection: 'row', backgroundColor: '#1e293b', paddingHorizontal: 12, paddingVertical: 8, gap: 8 },
-  tab: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: '#0f172a' },
-  tabActive: { backgroundColor: '#6366f1' },
-  tabText: { color: '#64748b', fontSize: 13, fontWeight: '600' },
-  tabTextActive: { color: '#fff' },
-
-  directorBanner: {
-    backgroundColor: '#1e1030', marginHorizontal: 12, marginTop: 8, borderRadius: 12,
-    padding: 12, borderWidth: 1, borderColor: '#7c3aed',
+  root: { flex: 1, backgroundColor: '#0a0f1e' },
+  header: {
+    paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 20,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
   },
-  directorBannerText: { color: '#c4b5fd', fontSize: 12, lineHeight: 18 },
+  headerTitle: { color: '#f1f5f9', fontSize: 26, fontWeight: '800', letterSpacing: -0.5 },
+  headerSub: { color: '#475569', fontSize: 12, marginTop: 2 },
+  roleBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#22d3ee' },
+  roleBadgeText: { fontSize: 11, fontWeight: '700' },
 
+  // Tab row
+  tabRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 12, paddingVertical: 10, backgroundColor: '#111827' },
+  tabBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: '#1e293b', borderWidth: 1.5, borderColor: '#334155' },
+  tabBtnCheckerActive: { borderColor: '#0ea5e9', backgroundColor: '#0c2340' },
+  tabBtnDirectorActive: { borderColor: '#7c3aed', backgroundColor: '#1e1030' },
+  tabBtnText: { color: '#475569', fontSize: 13, fontWeight: '600' },
+  tabBtnTextCheckerActive: { color: '#38bdf8' },
+  tabBtnTextDirectorActive: { color: '#c4b5fd' },
+  tabBadge: { backgroundColor: '#0ea5e9', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 1 },
+  tabBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800' },
+
+  // Banner
+  infoBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginHorizontal: 12, marginTop: 4, borderRadius: 10, padding: 10, borderWidth: 1 },
+  infoBannerText: { flex: 1, fontSize: 12, lineHeight: 17 },
+
+  // List
   list: { padding: 12, paddingBottom: 40, gap: 12 },
-  centerLoader: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loaderText: { color: '#64748b', fontSize: 14 },
+  loader: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loaderText: { color: '#475569', fontSize: 14 },
 
   // Card
-  card: { borderRadius: 20, overflow: 'hidden', backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155', flexDirection: 'row' },
-  cardStrip: { width: 4 },
-  cardInner: { flex: 1, padding: 16 },
-  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
-  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#4f46e5', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  cardRecipient: { color: '#f1f5f9', fontSize: 15, fontWeight: '700', flex: 1 },
-  cardSub: { color: '#64748b', fontSize: 12, marginTop: 2 },
-  cardAmountBox: { alignItems: 'flex-end', gap: 4 },
-  cardAmount: { color: '#10b981', fontSize: 17, fontWeight: '800' },
-  rolePill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 20 },
-  rolePillChecker: { backgroundColor: '#0c4a6e' },
-  rolePillDirector: { backgroundColor: '#3b1d7a' },
-  rolePillText: { color: '#fff', fontSize: 10, fontWeight: '700' },
-  descRow: { backgroundColor: '#0f172a', borderRadius: 8, padding: 8, marginBottom: 8 },
-  descText: { color: '#94a3b8', fontSize: 12, fontStyle: 'italic' },
-  cardMeta: { flexDirection: 'row', justifyContent: 'space-between' },
+  card: { borderRadius: 20, overflow: 'hidden', backgroundColor: '#1e293b', borderWidth: 1, flexDirection: 'row' },
+  cardAccent: { width: 5 },
+  cardBody: { flex: 1, padding: 16 },
+  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
+  cardAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  cardAvatarText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  cardName: { color: '#f1f5f9', fontSize: 15, fontWeight: '700' },
+  cardSub: { color: '#64748b', fontSize: 12 },
+  cardAmount: { fontSize: 17, fontWeight: '800' },
+  rolePill: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
+  rolePillText: { fontSize: 10, fontWeight: '700' },
+  cardDesc: { backgroundColor: '#0f172a', borderRadius: 8, padding: 8, marginBottom: 8 },
+  cardDescText: { color: '#94a3b8', fontSize: 12, fontStyle: 'italic' },
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   cardRef: { color: '#6366f1', fontSize: 11, fontWeight: '700', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   cardMaker: { color: '#475569', fontSize: 11 },
-  ctaRow: { marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: '#334155', alignItems: 'center' },
-  ctaText: { color: '#6366f1', fontSize: 13, fontWeight: '600' },
+  cardCta: { paddingTop: 10, borderTopWidth: 1, alignItems: 'center' },
+  cardCtaText: { fontSize: 13, fontWeight: '600' },
 
+  // Empty
   empty: { alignItems: 'center', paddingVertical: 80 },
-  emptyEmoji: { fontSize: 52, marginBottom: 12 },
-  emptyTitle: { color: '#f1f5f9', fontSize: 20, fontWeight: '700', marginBottom: 6 },
-  emptySub: { color: '#475569', fontSize: 14 },
+  emptyIconBox: { width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center', marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
+  emptyTitle: { color: '#f1f5f9', fontSize: 22, fontWeight: '700', marginBottom: 8 },
+  emptySub: { color: '#475569', fontSize: 14, textAlign: 'center' },
+  emptySub2: { color: '#334155', fontSize: 12, marginTop: 8 },
 
-  // Modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalSheet: {
-    backgroundColor: '#0f172a', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    maxHeight: '92%', borderWidth: 1, borderColor: '#1e293b',
-  },
-  modalHandle: { width: 40, height: 4, backgroundColor: '#334155', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  modalHeaderEmoji: { fontSize: 28 },
-  modalHeaderTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '800' },
-  modalHeaderRef: { color: '#64748b', fontSize: 12, marginTop: 2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
-  modalBody: { padding: 16 },
+  // Bottom sheet modal
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  sheet: { backgroundColor: '#0f172a', borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '94%', borderWidth: 1, borderColor: '#1e293b' },
+  handle: { width: 40, height: 4, backgroundColor: '#334155', borderRadius: 2, alignSelf: 'center', marginTop: 10, marginBottom: 4 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  sheetHeaderIcon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  sheetHeaderTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '800' },
+  sheetHeaderRef: { color: '#64748b', fontSize: 12, marginTop: 2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  sheetCloseBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#1e293b', alignItems: 'center', justifyContent: 'center' },
+  sheetBody: { padding: 16 },
+  sheetFooter: { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: '#1e293b' },
 
-  paymentSummaryBox: { backgroundColor: '#1e293b', borderRadius: 16, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
+  // Summary card
+  summaryCard: { backgroundColor: '#1e293b', borderRadius: 16, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#334155' },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#334155' },
   summaryLabel: { color: '#64748b', fontSize: 12, fontWeight: '600' },
   summaryValue: { color: '#f1f5f9', fontSize: 14, fontWeight: '600', maxWidth: '60%', textAlign: 'right' },
 
-  sectionLabel: { color: '#64748b', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 10, marginTop: 4 },
+  fieldLabel: { color: '#64748b', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 10, marginTop: 4 },
 
-  amountOptionsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  amountOption: { flex: 1, backgroundColor: '#1e293b', borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: '#334155', alignItems: 'center' },
-  amountOptionActive: { borderColor: '#10b981', backgroundColor: '#042f2e' },
-  amountOptionLabel: { color: '#64748b', fontSize: 11, fontWeight: '700', letterSpacing: 0.5 },
-  amountOptionLabelActive: { color: '#10b981' },
-  amountOptionValue: { color: '#f1f5f9', fontSize: 14, fontWeight: '800', marginTop: 4 },
+  // Amount toggle
+  amountToggleRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  amountToggleBtn: { flex: 1, backgroundColor: '#1e293b', borderRadius: 14, padding: 14, borderWidth: 1.5, borderColor: '#334155', alignItems: 'center', gap: 4 },
+  amountToggleBtnActive: { borderColor: '#10b981', backgroundColor: '#042f2e' },
+  amountToggleLabel: { color: '#64748b', fontSize: 11, fontWeight: '700' },
+  amountToggleValue: { color: '#f1f5f9', fontSize: 13, fontWeight: '800' },
 
-  customAmtBox: { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
-  inputLabel: { color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 8 },
-  customAmtRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  currencyPrefix: { color: '#64748b', fontSize: 16, fontWeight: '700' },
-  customAmtInput: { flex: 1, backgroundColor: '#0f172a', borderRadius: 10, padding: 12, color: '#10b981', fontSize: 22, fontWeight: '800', borderWidth: 1, borderColor: '#334155' },
-  amtWarning: { color: '#f59e0b', fontSize: 12, marginTop: 8 },
-  amtInfo: { color: '#60a5fa', fontSize: 12, marginTop: 8 },
+  // Custom amount
+  customAmtCard: { backgroundColor: '#1e293b', borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
+  customAmtInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  kesCurrency: { color: '#475569', fontSize: 18, fontWeight: '700' },
+  customAmtInput: { flex: 1, backgroundColor: '#0f172a', borderRadius: 10, padding: 12, color: '#10b981', fontSize: 26, fontWeight: '900', borderWidth: 1, borderColor: '#334155' },
 
-  finalApprovalBox: { backgroundColor: '#042f2e', borderRadius: 16, padding: 16, marginBottom: 16, alignItems: 'center', borderWidth: 1, borderColor: '#10b981' },
-  finalApprovalLabel: { color: '#10b981', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  finalApprovalAmount: { color: '#10b981', fontSize: 28, fontWeight: '900', marginTop: 4 },
+  warningRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  warningText: { color: '#f59e0b', fontSize: 12 },
+  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8 },
+  infoText: { color: '#60a5fa', fontSize: 12, flex: 1, lineHeight: 16 },
 
-  pinDots: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 10 },
-  pinDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#1e293b', borderWidth: 1.5, borderColor: '#334155' },
+  // Final amount
+  finalAmtBox: { borderRadius: 16, padding: 18, marginBottom: 16, alignItems: 'center', borderWidth: 1, borderColor: '#10b981' },
+  finalAmtLabel: { color: '#6ee7b7', fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+  finalAmtValue: { color: '#10b981', fontSize: 32, fontWeight: '900', marginTop: 4 },
+  finalAmtNote: { color: '#6ee7b7', fontSize: 12, marginTop: 6, textAlign: 'center' },
+
+  // Description + Note
+  descCard: { backgroundColor: '#1e293b', borderRadius: 12, padding: 12, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
+  descText: { color: '#94a3b8', fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
+  noteInput: { backgroundColor: '#1e293b', borderRadius: 12, borderWidth: 1, borderColor: '#334155', padding: 12, color: '#f1f5f9', fontSize: 14, height: 70, textAlignVertical: 'top', marginBottom: 12 },
+
+  // Rejection
+  reasonInput: { backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1.5, borderColor: '#ef4444', padding: 12, color: '#f1f5f9', fontSize: 14, height: 90, textAlignVertical: 'top', marginBottom: 12 },
+
+  // PIN
+  pinDotsRow: { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: 10 },
+  pinDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#1e293b', borderWidth: 2, borderColor: '#334155' },
   pinDotFilled: { backgroundColor: '#6366f1', borderColor: '#6366f1' },
-  pinInput: {
-    backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1, borderColor: '#334155',
-    paddingVertical: 14, paddingHorizontal: 20, color: '#f1f5f9', fontSize: 18,
-    letterSpacing: 8, marginBottom: 16,
-  },
+  pinDotCurrent: { borderColor: '#6366f1' },
+  pinInput: { backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1, borderColor: '#334155', paddingVertical: 14, paddingHorizontal: 20, color: '#f1f5f9', fontSize: 22, letterSpacing: 12, marginBottom: 16 },
 
-  reasonInput: {
-    backgroundColor: '#1e293b', borderRadius: 14, borderWidth: 1.5, borderColor: '#ef4444',
-    padding: 12, color: '#f1f5f9', fontSize: 14, height: 90,
-    textAlignVertical: 'top', marginBottom: 16,
-  },
+  // Mode toggle
+  modeRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
+  modeBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderRadius: 12, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
+  modeBtnApprove: { borderColor: '#10b981', backgroundColor: '#042f2e' },
+  modeBtnReject: { borderColor: '#ef4444', backgroundColor: '#2d0f0f' },
+  modeBtnText: { color: '#94a3b8', fontSize: 13, fontWeight: '700' },
 
-  modeToggleRow: { flexDirection: 'row', gap: 10, marginBottom: 8 },
-  modeBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#1e293b', alignItems: 'center', borderWidth: 1, borderColor: '#334155' },
-  modeBtnActive: { borderColor: '#10b981', backgroundColor: '#042f2e' },
-  modeBtnRejectActive: { borderColor: '#ef4444', backgroundColor: '#2d0f0f' },
-  modeBtnText: { color: '#94a3b8', fontSize: 14, fontWeight: '700' },
-
-  modalFooter: { flexDirection: 'row', gap: 10, padding: 16, borderTopWidth: 1, borderTopColor: '#1e293b' },
+  // Footer buttons
   cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 14, backgroundColor: '#1e293b', alignItems: 'center' },
   cancelBtnText: { color: '#94a3b8', fontSize: 15, fontWeight: '700' },
-  submitBtn: { flex: 2, paddingVertical: 14, borderRadius: 14, alignItems: 'center' },
+  submitBtn: { flex: 2, paddingVertical: 14, borderRadius: 14, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
   submitBtnApprove: { backgroundColor: '#059669' },
   submitBtnReject: { backgroundColor: '#dc2626' },
   submitBtnText: { color: '#fff', fontSize: 15, fontWeight: '800' },
