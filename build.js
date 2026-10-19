@@ -4,7 +4,7 @@ const path = require('path');
 
 console.log('🚀 [Build] Starting KenyaPay Monorepo Build...');
 
-// 1. Fallback environment variables for Prisma generation (generate only needs valid syntax, no live DB needed)
+// 1. Fallback environment variables for Prisma generation
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/postgres';
 process.env.DIRECT_URL = process.env.DIRECT_URL || 'postgresql://postgres:postgres@localhost:5432/postgres';
 
@@ -26,7 +26,16 @@ console.log('📦 [2/3] Installing frontend dependencies...');
 execSync('npm --prefix frontend install --legacy-peer-deps', { stdio: 'inherit' });
 
 // 4. Build Vite frontend
-console.log('⚡ [3/3] Building Vite React frontend to frontend/dist...');
+console.log('⚡ [3/3] Building Vite React frontend...');
 execSync('npm --prefix frontend run build', { stdio: 'inherit' });
 
-console.log('✅ [Build] KenyaPay Monorepo Build successfully finished!');
+// 5. Populate both root "dist" and "frontend/dist" so Vercel finds it anywhere it looks
+console.log('📂 [4/4] Syncing frontend/dist to root dist directory...');
+const srcDist = path.join(__dirname, 'frontend', 'dist');
+const rootDist = path.join(__dirname, 'dist');
+if (fs.existsSync(rootDist)) {
+  fs.rmSync(rootDist, { recursive: true, force: true });
+}
+fs.cpSync(srcDist, rootDist, { recursive: true });
+
+console.log('✅ [Build] KenyaPay Monorepo Build successfully finished! (both dist and frontend/dist ready)');
