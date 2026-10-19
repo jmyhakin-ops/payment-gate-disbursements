@@ -12,7 +12,9 @@
       "resizeMode": "contain",
       "backgroundColor": "#4f46e5"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "co.ke.kenyapay.app",
@@ -67,10 +69,14 @@
       "typedRoutes": true
     },
     "extra": {
-      "apiUrl": "https://your-backend.railway.app/api/v1",
+      "apiUrl": "https://payment-gate-disbursements.vercel.app/api/v1",
+      "router": {
+        "origin": false
+      },
       "eas": {
-        "projectId": "your-eas-project-id"
+        "projectId": "c051089d-b804-4efa-bf7f-f29b771faf22"
       }
-    }
+    },
+    "owner": "easysetup"
   }
 }
