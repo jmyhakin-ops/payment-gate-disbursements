@@ -107,7 +107,7 @@ export async function initiatePayment(params: {
         recipientBankCode: params.recipientBankCode,
         recipientBankName: params.recipientBankName,
         recipientBranchCode: params.recipientBranchCode,
-        metadata: params.metadata,
+        metadata: params.metadata as any,
         scheduledAt: params.scheduledAt,
       },
     });
@@ -435,7 +435,7 @@ export async function processPayment(transactionId: string, organizationId: stri
     });
 
     // For synchronous rails (PesaLink, Bank), mark completed immediately
-    if ([PaymentRail.PESALINK, PaymentRail.EQUITY_JENGA, PaymentRail.RTGS, PaymentRail.KCB_OPEN_BANKING].includes(tx.rail)) {
+    if (([PaymentRail.PESALINK, PaymentRail.EQUITY_JENGA, PaymentRail.RTGS, PaymentRail.KCB_OPEN_BANKING] as PaymentRail[]).includes(tx.rail)) {
       await markTransactionCompleted(transactionId, externalRef, organizationId);
     }
     // M-Pesa results come via webhook callback

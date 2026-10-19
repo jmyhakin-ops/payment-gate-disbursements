@@ -87,7 +87,7 @@ export async function createInAppNotification(params: {
       recipient: params.userId || params.organizationId || 'system',
       subject: params.subject,
       message: params.message,
-      metadata: params.metadata,
+      metadata: params.metadata as any,
       isSent: true,
       sentAt: new Date(),
     },

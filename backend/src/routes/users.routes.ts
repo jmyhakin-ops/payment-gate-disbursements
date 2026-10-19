@@ -179,7 +179,7 @@ router.put('/:id', authorize(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN), async (r
 
     const updated = await prisma.user.update({
       where: { id: req.params.id },
-      data,
+      data: data as any,
       select: {
         id: true, firstName: true, lastName: true, email: true, role: true, status: true,
         department: true, jobTitle: true, phone: true, updatedAt: true,

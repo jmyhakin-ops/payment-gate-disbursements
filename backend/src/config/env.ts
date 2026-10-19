@@ -34,6 +34,7 @@ const envSchema = z.object({
   PESALINK_CLIENT_ID: z.string().optional(),
   PESALINK_CLIENT_SECRET: z.string().optional(),
   PESALINK_BASE_URL: z.string().optional(),
+  PESALINK_CALLBACK_URL: z.string().optional(),
   JENGA_API_KEY: z.string().optional(),
   JENGA_MERCHANT_CODE: z.string().optional(),
   JENGA_CONSUMER_SECRET: z.string().optional(),
