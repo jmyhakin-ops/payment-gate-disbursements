@@ -63,10 +63,12 @@ router.put('/', authorize(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN), async (req:
 // ─── GET /settings/api-credentials — list all API creds for org ───────────────
 router.get('/api-credentials', authorize(UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.FINANCE_MANAGER), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const orgId = req.user!.organizationId;
-    if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
+    const orgId = req.user!.organizationId || null;
+    if (!orgId && req.user!.role !== UserRole.SUPER_ADMIN) {
+      throw new AppError('No organization', 403, 'NO_ORG');
+    }
     const creds = await prisma.apiCredential.findMany({
-      where: { organizationId: orgId },
+      where: { organizationId: orgId ?? undefined },
       orderBy: { type: 'asc' },
     });
     // Return masked version
@@ -91,13 +93,16 @@ router.post('/api-credentials', authorize(UserRole.SUPER_ADMIN, UserRole.ORG_ADM
       webhookSecret: z.string().optional(),
     });
     const data = schema.parse(req.body);
-    const orgId = req.user!.organizationId;
-    if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
+    // Super Admin can save system-level credentials (null orgId), ORG_ADMIN must have an org
+    const orgId = req.user!.organizationId || null;
+    if (!orgId && req.user!.role !== UserRole.SUPER_ADMIN) {
+      throw new AppError('No organization', 403, 'NO_ORG');
+    }
 
     const encryptedCreds = encryptCredentials(data.credentials);
 
     const existing = await prisma.apiCredential.findFirst({
-      where: { organizationId: orgId, type: data.type, environment: data.environment },
+      where: { organizationId: orgId ?? undefined, type: data.type, environment: data.environment },
     });
 
     let result;
@@ -108,12 +113,12 @@ router.post('/api-credentials', authorize(UserRole.SUPER_ADMIN, UserRole.ORG_ADM
       });
     } else {
       result = await prisma.apiCredential.create({
-        data: { organizationId: orgId, type: data.type, name: data.name, environment: data.environment, credentials: encryptedCreds, webhookSecret: data.webhookSecret },
+        data: { organizationId: orgId as string, type: data.type, name: data.name, environment: data.environment, credentials: encryptedCreds, webhookSecret: data.webhookSecret },
       });
     }
 
     await auditLog({
-      organizationId: orgId,
+      organizationId: orgId || undefined,
       userId: req.user!.id,
       action: 'API_CREDENTIAL_CHANGE',
       resource: 'ApiCredential',

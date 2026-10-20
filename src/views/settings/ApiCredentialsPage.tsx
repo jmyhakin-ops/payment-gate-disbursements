@@ -151,13 +151,35 @@ export default function ApiCredentialsPage() {
   const credentials: any[] = credentialsData ?? [];
 
   const saveMutation = useMutation({
-    mutationFn: ({ rail, creds }: { rail: string; creds: Record<string, string> }) =>
-      api.post('/settings/api-credentials', { rail, credentials: creds }).then(r => r.data),
+    mutationFn: ({ rail, creds }: { rail: string; creds: Record<string, string> }) => {
+      // Map frontend rail key → backend ApiCredentialType enum
+      const TYPE_MAP: Record<string, string> = {
+        MPESA_B2C:        'MPESA_DARAJA',
+        MPESA_B2B:        'MPESA_DARAJA',
+        PESALINK:         'PESALINK',
+        EQUITY_JENGA:     'EQUITY_JENGA',
+        KCB_OPENBANKING:  'KCB_OPEN_BANKING',
+        AFRICAS_TALKING:  'AFRICAS_TALKING',
+        EMAIL_SMTP:       'SMTP_EMAIL',
+      };
+      const railConfig = RAILS.find(r => r.key === rail);
+      const type = TYPE_MAP[rail] || 'MPESA_DARAJA';
+      const name = railConfig?.label || rail;
+      const environment = creds.environment || 'sandbox';
+      // Strip 'environment' from credentials object (it's a top-level field)
+      const { environment: _env, ...credentialsOnly } = creds;
+      return api.post('/settings/api-credentials', {
+        type,
+        name,
+        environment,
+        credentials: credentialsOnly,
+      }).then(r => r.data);
+    },
     onSuccess: (_, { rail }) => {
       toast({ type: 'success', title: `${rail} credentials saved`, description: 'Credentials encrypted with AES-256' });
       qc.invalidateQueries(['api-credentials']);
     },
-    onError: () => toast({ type: 'error', title: 'Failed to save credentials' }),
+    onError: (e: any) => toast({ type: 'error', title: 'Failed to save credentials', description: e?.response?.data?.message || 'Please check all required fields' }),
   });
 
   const deleteMutation = useMutation({

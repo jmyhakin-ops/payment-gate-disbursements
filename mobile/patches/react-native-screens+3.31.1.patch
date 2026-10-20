@@ -1,0 +1,14 @@
+diff --git a/android/src/main/java/com/swmansion/rnscreens/ScreensModule.kt b/android/src/main/java/com/swmansion/rnscreens/ScreensModule.kt
+index 1234567..abcdefg 100644
+--- a/android/src/main/java/com/swmansion/rnscreens/ScreensModule.kt
++++ b/android/src/main/java/com/swmansion/rnscreens/ScreensModule.kt
+@@ -20,7 +20,7 @@ class ScreensModule(private val reactContext: ReactApplicationContext)
+             } else {
+                 Log.e("[RNScreens]", "Could not install JSI bindings.")
+             }
+-        } catch (exception: Exception) {
+-            Log.w("[RNScreens]", "Could not load RNScreens module.")
++        } catch (exception: Throwable) {
++            Log.w("[RNScreens]", "Could not load RNScreens module: ${exception.message}")
+         }
+     }

@@ -9,6 +9,7 @@ interface DialogProps {
   title?: string;
   description?: string;
   children: React.ReactNode;
+  footer?: React.ReactNode;
   className?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 }
@@ -21,8 +22,17 @@ const sizes = {
   '2xl': 'max-w-2xl',
 };
 
-export function Dialog({ open, onClose, title, description, children, className, size = 'md' }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, footer, className, size = 'md' }: DialogProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
+
+  // Separate DialogFooter children from content children
+  const childArray = React.Children.toArray(children);
+  const footerChild = childArray.find(
+    (child) => React.isValidElement(child) && (child.type as any).displayName === 'DialogFooter'
+  );
+  const contentChildren = childArray.filter(
+    (child) => !(React.isValidElement(child) && (child.type as any).displayName === 'DialogFooter')
+  );
 
   useEffect(() => {
     if (open) {
@@ -51,13 +61,14 @@ export function Dialog({ open, onClose, title, description, children, className,
     >
       <div
         className={cn(
-          'relative w-full bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200',
+          'relative w-full bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 flex flex-col',
+          'max-h-[90vh]',
           sizes[size],
           className
         )}
       >
         {(title || description) && (
-          <div className="flex items-start justify-between p-6 border-b border-slate-200 dark:border-slate-700">
+          <div className="flex items-start justify-between p-6 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
             <div>
               {title && <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{title}</h2>}
               {description && <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{description}</p>}
@@ -70,7 +81,10 @@ export function Dialog({ open, onClose, title, description, children, className,
             </button>
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className="px-6 pt-6 overflow-y-auto flex-1">{contentChildren}</div>
+        {(footerChild || footer) && (
+          <div className="flex-shrink-0">{footerChild || footer}</div>
+        )}
       </div>
     </div>
   );
@@ -83,11 +97,12 @@ interface DialogFooterProps {
 
 export function DialogFooter({ children, className }: DialogFooterProps) {
   return (
-    <div className={cn('flex items-center justify-end gap-3 pt-4 mt-4 border-t border-slate-200 dark:border-slate-700', className)}>
+    <div className={cn('flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex-shrink-0 bg-white dark:bg-slate-900 rounded-b-2xl', className)}>
       {children}
     </div>
   );
 }
+DialogFooter.displayName = 'DialogFooter';
 
 interface ConfirmDialogProps {
   open: boolean;
