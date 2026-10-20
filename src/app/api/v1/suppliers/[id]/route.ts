@@ -34,23 +34,21 @@ const updateSchema = z.object({
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId, decoded.role);
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    const orgId = decoded.organizationId;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
 
-    const supplier = await prisma.supplier.findFirst({
-      where: { id: params.id, organizationId: orgId },
-    });
-
+    // Super Admin can look up any supplier; others only see their org
+    const where: any = isSuperAdmin ? { id: params.id } : { id: params.id, organizationId: orgId };
+    const supplier = await prisma.supplier.findFirst({ where });
     if (!supplier) throw new AppError('Supplier not found', 404, 'NOT_FOUND');
 
-    // Fetch recent transactions linked to this supplier
+    const txWhere: any = isSuperAdmin
+      ? { OR: [{ recipientPhone: supplier.phone ?? undefined }, { recipientName: { contains: supplier.name, mode: 'insensitive' } }] }
+      : { organizationId: orgId, OR: [{ recipientPhone: supplier.phone ?? undefined }, { recipientName: { contains: supplier.name, mode: 'insensitive' } }] };
+
     const recentTx = await prisma.transaction.findMany({
-      where: {
-        organizationId: orgId,
-        OR: [
-          { recipientPhone: supplier.phone ?? undefined },
-          { recipientName: { contains: supplier.name, mode: 'insensitive' } },
-        ],
-      },
+      where: txWhere,
       orderBy: { createdAt: 'desc' },
       take: 20,
       select: {
@@ -69,41 +67,36 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId, decoded.role);
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    const orgId = decoded.organizationId;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
 
-    const existing = await prisma.supplier.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const where: any = isSuperAdmin ? { id: params.id } : { id: params.id, organizationId: orgId };
+    const existing = await prisma.supplier.findFirst({ where });
     if (!existing) throw new AppError('Supplier not found', 404, 'NOT_FOUND');
 
     const body = await request.json();
     const data = updateSchema.parse(body);
-
     const clean: any = { ...data };
-    for (const key of Object.keys(clean)) {
-      if (clean[key] === '') clean[key] = null;
-    }
+    for (const key of Object.keys(clean)) { if (clean[key] === '') clean[key] = null; }
 
-    const updated = await prisma.supplier.update({
-      where: { id: params.id },
-      data: clean,
-    });
-
+    const updated = await prisma.supplier.update({ where: { id: params.id }, data: clean });
     return Response.json({ success: true, data: updated });
-  } catch (err) {
-    return handleApiError(err);
-  }
+  } catch (err) { return handleApiError(err); }
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId, decoded.role);
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    const orgId = decoded.organizationId;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
 
-    const existing = await prisma.supplier.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const where: any = isSuperAdmin ? { id: params.id } : { id: params.id, organizationId: orgId };
+    const existing = await prisma.supplier.findFirst({ where });
     if (!existing) throw new AppError('Supplier not found', 404, 'NOT_FOUND');
 
     await prisma.supplier.delete({ where: { id: params.id } });
     return Response.json({ success: true, message: 'Supplier deleted' });
-  } catch (err) {
-    return handleApiError(err);
-  }
+  } catch (err) { return handleApiError(err); }
 }

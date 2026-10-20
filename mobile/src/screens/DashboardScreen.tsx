@@ -73,15 +73,24 @@ export default function DashboardScreen() {
     queryFn: () => paymentsApi.list({ limit: 10, sortBy: 'createdAt', sortDir: 'desc' }).then(r => r.data.data ?? []),
   });
 
+  // Fetch real pending counts from the correct endpoints
+  const { data: pendingCounts, refetch: refetchPending } = useQuery({
+    queryKey: ['mobile-pending-counts'],
+    queryFn: () => paymentsApi.pendingCounts(),
+    refetchInterval: 30000,
+  });
+
   const wallets: any[] = walletData ?? [];
   const txs: any[] = txData ?? [];
-  const pending = (summary?.pendingApprovals ?? 0) + (summary?.pendingDirector ?? 0);
+  // Use pendingCounts from correct API endpoints, fallback to dashboard field
+  const pending = (pendingCounts?.checker ?? 0) + (pendingCounts?.director ?? 0);
 
   const doRefresh = () => {
     try { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); } catch {}
     refetch();
     refetchWallets();
     refetchTx();
+    refetchPending();
   };
 
   const hour = new Date().getHours();
@@ -251,28 +260,28 @@ export default function DashboardScreen() {
           <View style={s.statsGrid}>
             <StatCard
               label="TOTAL DISBURSED"
-              value={fmtKES(Number(summary?.totalDisbursed ?? 0))}
-              sub={`${summary?.successCount ?? 0} successful payouts`}
+              value={fmtKES(Number(summary?.totalAmountProcessed ?? 0))}
+              sub={`${summary?.completedTransactions ?? 0} successful payouts`}
               color="#059669"
               icon="💰"
             />
             <StatCard
-              label="ACTIVE RAILS"
-              value="5 Active"
-              sub="M-Pesa, PesaLink, RTGS"
+              label="TOTAL PAYMENTS"
+              value={`${summary?.totalTransactions ?? 0}`}
+              sub={`${summary?.failedTransactions ?? 0} failed`}
               color="#4f46e5"
               icon="⚡"
             />
             <StatCard
               label="CHECKER QUEUE"
-              value={`${summary?.pendingApprovals ?? 0} Items`}
+              value={`${pendingCounts?.checker ?? summary?.pendingApprovals ?? 0} Items`}
               sub="Awaiting first review"
               color="#d97706"
               icon="📋"
             />
             <StatCard
-              label="DIRECTOR PIN QUEUE"
-              value={`${summary?.pendingDirector ?? 0} Items`}
+              label="DIRECTOR QUEUE"
+              value={`${pendingCounts?.director ?? 0} Items`}
               sub="Final authorization"
               color="#7c3aed"
               icon="🔐"

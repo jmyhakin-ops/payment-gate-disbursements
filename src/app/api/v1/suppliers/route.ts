@@ -36,7 +36,9 @@ const createSchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId, decoded.role);
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    const orgId = decoded.organizationId;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
     const { searchParams } = new URL(request.url);
 
     const search   = searchParams.get('search') ?? '';
@@ -50,7 +52,8 @@ export async function GET(request: NextRequest) {
     const limit    = Math.min(100, parseInt(searchParams.get('limit') ?? '20'));
     const skip     = (page - 1) * limit;
 
-    const where: any = { organizationId: orgId };
+    // Super Admin sees ALL suppliers across all orgs; others see only their org
+    const where: any = isSuperAdmin ? {} : { organizationId: orgId };
 
     if (search) {
       where.OR = [
@@ -87,22 +90,22 @@ export async function GET(request: NextRequest) {
       prisma.supplier.count({ where }),
     ]);
 
-    // Stats
+    // Stats — Super Admin sees platform-wide totals
+    const statsWhere = isSuperAdmin ? {} : { organizationId: orgId };
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const [statsTotal, statsActive, statsThisMonth] = await Promise.all([
-      prisma.supplier.count({ where: { organizationId: orgId } }),
-      prisma.supplier.count({ where: { organizationId: orgId, status: 'ACTIVE' } }),
+    const [statsTotal, statsActive, statsThisMonth, totalPaidAgg] = await Promise.all([
+      prisma.supplier.count({ where: statsWhere }),
+      prisma.supplier.count({ where: { ...statsWhere, status: 'ACTIVE' } }),
       prisma.supplier.aggregate({
-        where: { organizationId: orgId, lastPaymentAt: { gte: startOfMonth } },
+        where: { ...statsWhere, lastPaymentAt: { gte: startOfMonth } },
         _sum: { lastPaymentAmount: true },
       }),
+      prisma.supplier.aggregate({
+        where: statsWhere,
+        _sum: { totalPaid: true },
+      }),
     ]);
-
-    const totalPaidAgg = await prisma.supplier.aggregate({
-      where: { organizationId: orgId },
-      _sum: { totalPaid: true },
-    });
 
     return Response.json({
       success: true,
