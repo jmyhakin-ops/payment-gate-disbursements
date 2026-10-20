@@ -28,6 +28,8 @@ export default function PaymentDetailPage() {
   const { data: tx, isLoading } = useQuery({
     queryKey: ['payment', id],
     queryFn: () => paymentsApi.get(id!).then((r) => r.data.data),
+    // Clear stale mutation error whenever fresh data arrives
+    onSuccess: () => setError(''),
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['payment', id] });
@@ -85,7 +87,7 @@ export default function PaymentDetailPage() {
         </span>
       </div>
 
-      {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm flex items-start gap-2"><AlertTriangle className="w-4 h-4 mt-0.5" />{error}</div>}
+      {error && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm flex items-start gap-2"><AlertTriangle className="w-4 h-4 mt-0.5" /><span className="flex-1">{error}</span><button onClick={() => setError('')} className="text-red-400 hover:text-red-600 font-bold">✕</button></div>}
 
       {/* Approval Timeline */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">

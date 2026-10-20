@@ -39,7 +39,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       const workflow = await prisma.approvalWorkflow.findUnique({ where: { transactionId: params.id } });
       if (workflow) {
         await prisma.directorApproval.create({
-          data: { workflowId: workflow.id, directorId: decoded.userId, action: approvalAction, note },
+          data: {
+            transactionId: params.id,
+            approvalWorkflowId: workflow.id,
+            directorId: decoded.userId,
+            action: approvalAction,
+            note,
+          },
         });
       }
 

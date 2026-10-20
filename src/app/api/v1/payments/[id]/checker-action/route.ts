@@ -67,16 +67,18 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         txUpdateData.charges = newCharges;
         txUpdateData.netAmount = newNetAmount;
 
-        // Release the difference from reserved balance back to available
-        walletOps.push(
-          prisma.wallet.update({
-            where: { id: tx.walletId },
-            data: {
-              reservedBalance: { decrement: refundDiff },
-              // balance stays the same — the reserved portion is just reduced
-            },
-          })
-        );
+        // Release the difference from reserved balance back to available (only if walletId exists)
+        if (tx.walletId) {
+          walletOps.push(
+            prisma.wallet.update({
+              where: { id: tx.walletId },
+              data: {
+                reservedBalance: { decrement: refundDiff },
+                // balance stays the same — the reserved portion is just reduced
+              },
+            })
+          );
+        }
       }
 
       await prisma.$transaction([
@@ -112,10 +114,12 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       await prisma.transaction.update({ where: { id: params.id }, data: { status: returnStatus, failureReason: note } });
       if (approvalAction === ApprovalAction.REJECTED) {
         // Release ALL reserved balance
-        await prisma.wallet.update({
-          where: { id: tx.walletId },
-          data: { reservedBalance: { decrement: tx.netAmount }, balance: { increment: tx.netAmount } },
-        });
+        if (tx.walletId) {
+          await prisma.wallet.update({
+            where: { id: tx.walletId },
+            data: { reservedBalance: { decrement: tx.netAmount ?? tx.amount }, balance: { increment: tx.netAmount ?? tx.amount } },
+          });
+        }
       }
       return Response.json({ success: true, message: `Transaction ${approvalAction.toLowerCase()}` });
     }
