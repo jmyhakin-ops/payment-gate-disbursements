@@ -1,17 +1,17 @@
-import { Stack } from 'expo-router';
+import React from 'react';
+import { Stack, Redirect } from 'expo-router';
 import { useAuthStore } from '../../src/store/auth.store';
-import { Redirect } from 'expo-router';
 
 export default function AuthLayout() {
-  const { token } = useAuthStore();
+  const { isAuthenticated, isLoading } = useAuthStore();
 
-  if (token) {
+  if (!isLoading && isAuthenticated) {
     return <Redirect href="/(tabs)" />;
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
+    <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
   );
 }

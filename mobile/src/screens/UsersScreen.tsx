@@ -184,13 +184,13 @@ function ChangeRoleSheet({ user, visible, onClose }: any) {
       <View style={ds.overlay}>
         <View style={[ds.sheet, { maxHeight: '80%' }]}>
           <View style={ds.sheetHandle} />
-          <View style={[ds.sheetHeader, { backgroundColor: '#0f172a' }]}>
+          <View style={[ds.sheetHeader, { backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }]}>
             <View style={{ flex: 1 }}>
-              <Text style={ds.sheetName}>Change Role</Text>
-              <Text style={ds.sheetEmail}>{user.firstName} {user.lastName}</Text>
+              <Text style={[ds.sheetName, { color: '#0f172a' }]}>Change Role</Text>
+              <Text style={[ds.sheetEmail, { color: '#64748b' }]}>{user.firstName} {user.lastName}</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={ds.sheetClose}>
-              <Ionicons name="close" size={20} color="#94a3b8" />
+            <TouchableOpacity onPress={onClose} style={[ds.sheetClose, { backgroundColor: '#f1f5f9' }]}>
+              <Ionicons name="close" size={20} color="#64748b" />
             </TouchableOpacity>
           </View>
           <ScrollView style={ds.sheetBody}>
@@ -420,11 +420,11 @@ export default function UsersScreen() {
 
 const ds = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'flex-end' },
-  headerTitle: { color: '#f1f5f9', fontSize: 24, fontWeight: '800' },
-  headerSub: { color: '#475569', fontSize: 12, marginTop: 2 },
-  inviteBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#eef2ff', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
-  inviteBadgeText: { fontSize: 11, fontWeight: '700', color: '#6366f1' },
+  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  headerTitle: { color: '#0f172a', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
+  headerSub: { color: '#64748b', fontSize: 12, marginTop: 2, fontWeight: '500' },
+  inviteBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#eef2ff', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: '#c7d2fe' },
+  inviteBadgeText: { fontSize: 11, fontWeight: '800', color: '#4f46e5' },
 
   roleChipsScroll: { maxHeight: 48, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   roleChipsContainer: { paddingHorizontal: 12, paddingVertical: 8, gap: 6, flexDirection: 'row' },

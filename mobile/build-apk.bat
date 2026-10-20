@@ -24,10 +24,11 @@ if exist "app\build\outputs\apk\release\app-release.apk" (
     echo  BUILD SUCCESSFUL!
     echo ================================================
     echo.
-    echo Copying APK to mobile folder...
-    copy "app\build\outputs\apk\release\app-release.apk" "..\KenyaPay-v1.0.0.apk"
+    echo Copying APK to mobile folder and Desktop...
+    copy "app\build\outputs\apk\release\app-release.apk" "..\KenyaPay-v3.5.0.apk"
+    copy "app\build\outputs\apk\release\app-release.apk" "%USERPROFILE%\Desktop\KenyaPay-v3.5.0.apk"
     echo.
-    echo APK saved to: KenyaPay-v1.0.0.apk
+    echo APK saved to: KenyaPay-v3.5.0.apk (and Desktop)
     echo.
 ) else (
     echo ================================================
