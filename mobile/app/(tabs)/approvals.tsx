@@ -1,1 +1,1 @@
-export { default } from '../../../src/screens/ApprovalsScreen';
+export { default } from '../../src/screens/ApprovalsScreen';
