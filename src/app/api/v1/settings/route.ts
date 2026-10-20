@@ -32,8 +32,9 @@ export async function GET(request: NextRequest) {
 
     if (section === 'api-credentials') {
       if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.FINANCE_MANAGER].includes(decoded.role)) throw new AppError('Access denied', 403, 'FORBIDDEN');
-      if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
-      const creds = await prisma.apiCredential.findMany({ where: { organizationId: orgId }, orderBy: { type: 'asc' } });
+      if (!orgId && decoded.role !== UserRole.SUPER_ADMIN) throw new AppError('No organization', 403, 'NO_ORG');
+      const credWhere = orgId ? { organizationId: orgId } : {};
+      const creds = await prisma.apiCredential.findMany({ where: credWhere, orderBy: { type: 'asc' } });
       const masked = creds.map((c) => {
         let parsedCreds: Record<string, string> = {};
         try { parsedCreds = JSON.parse(decrypt(c.credentials)); } catch { parsedCreds = {}; }
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
+    if (!orgId && decoded.role !== UserRole.SUPER_ADMIN) throw new AppError('No organization', 403, 'NO_ORG');
     const body = await request.json();
     const { searchParams } = new URL(request.url);
     const section = searchParams.get('section');
@@ -98,6 +99,7 @@ export async function POST(request: NextRequest) {
 
     if (section === 'api-credentials') {
       if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) throw new AppError('Access denied', 403, 'FORBIDDEN');
+      if (!orgId) throw new AppError('No organization linked. Please contact support.', 403, 'NO_ORG');
       const data = z.object({ type: z.nativeEnum(ApiCredentialType), name: z.string().min(2), environment: z.enum(['sandbox', 'production']), credentials: z.record(z.string()), webhookSecret: z.string().optional() }).parse(body);
       const encryptedCreds = encrypt(JSON.stringify(data.credentials));
       const existing = await prisma.apiCredential.findFirst({ where: { organizationId: orgId, type: data.type, environment: data.environment } });
@@ -108,6 +110,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (section === 'bank-accounts') {
+      if (!orgId) throw new AppError('No organization linked.', 403, 'NO_ORG');
       const data = z.object({ accountName: z.string().min(2), accountNumber: z.string().min(6), bankName: z.string().min(2), bankCode: z.string().min(2), branchCode: z.string().optional(), swiftCode: z.string().optional(), pesaLinkEnabled: z.boolean().default(true), rtgsEnabled: z.boolean().default(false) }).parse(body);
       const account = await prisma.bankAccount.create({ data: { organizationId: orgId, ...data } });
       return Response.json({ success: true, data: account }, { status: 201 });
