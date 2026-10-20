@@ -3,11 +3,11 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getAuthFromRequest } from '@/lib/auth';
 import { AppError, handleApiError } from '@/lib/errors';
-import { SupplierStatus } from '@prisma/client';
+import { SupplierStatus, UserRole } from '@prisma/client';
 
-function requireOrg(orgId: string | null) {
-  if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
-  return orgId;
+function requireOrg(orgId: string | null, role: UserRole): string {
+  if (!orgId && role !== UserRole.SUPER_ADMIN) throw new AppError('No organization', 403, 'NO_ORG');
+  return orgId!;
 }
 
 const createSchema = z.object({
@@ -36,7 +36,7 @@ const createSchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId);
+    const orgId = requireOrg(decoded.organizationId, decoded.role);
     const { searchParams } = new URL(request.url);
 
     const search   = searchParams.get('search') ?? '';
@@ -128,7 +128,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId);
+    const orgId = requireOrg(decoded.organizationId, decoded.role);
     const body = await request.json();
     const data = createSchema.parse(body);
 

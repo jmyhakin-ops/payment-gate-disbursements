@@ -17,9 +17,14 @@ export async function GET(request: NextRequest) {
     const action = searchParams.get('action');
 
     if (action === 'me') {
-      if (!decoded.organizationId) throw new AppError('No organization', 404, 'NO_ORG');
+      const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+      const orgId = decoded.organizationId;
+      // Super Admin can pass ?orgId= to look up any org, or their own if they have one
+      const { searchParams: sp } = new URL(request.url);
+      const targetOrgId = sp.get('orgId') ?? orgId;
+      if (!targetOrgId) throw new AppError('No organization', 404, 'NO_ORG');
       const org = await prisma.organization.findUnique({
-        where: { id: decoded.organizationId },
+        where: { id: targetOrgId },
         include: { directors: { include: { user: { select: { id: true, firstName: true, lastName: true, email: true } } } }, _count: { select: { users: true, transactions: true, wallets: true } } },
       });
       if (!org) throw new AppError('Organization not found', 404, 'NOT_FOUND');
@@ -65,11 +70,14 @@ export async function POST(request: NextRequest) {
     if (action === 'add-director') {
       requireRole(decoded.role, UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN);
       const orgId = decoded.organizationId;
-      if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
-      const data = z.object({ userId: z.string().uuid(), name: z.string().min(2), email: z.string().email(), phone: z.string(), nationalId: z.string() }).parse(body);
-      const user = await prisma.user.findFirst({ where: { id: data.userId, organizationId: orgId } });
+      const body2 = await request.clone().json().catch(() => body);
+      // Super Admin can target a specific org via the body
+      const targetOrgId = (body2 as any).organizationId ?? orgId;
+      if (!targetOrgId) throw new AppError('No organization', 403, 'NO_ORG');
+      const data = z.object({ userId: z.string().uuid(), name: z.string().min(2), email: z.string().email(), phone: z.string(), nationalId: z.string(), organizationId: z.string().uuid().optional() }).parse(body);
+      const user = await prisma.user.findFirst({ where: { id: data.userId, organizationId: targetOrgId } });
       if (!user) throw new AppError('User not found in this organization', 404, 'NOT_FOUND');
-      const director = await prisma.organizationDirector.create({ data: { organizationId: orgId, ...data } });
+      const director = await prisma.organizationDirector.create({ data: { organizationId: targetOrgId, userId: data.userId, name: data.name, email: data.email, phone: data.phone, nationalId: data.nationalId } });
       await prisma.user.update({ where: { id: data.userId }, data: { role: UserRole.DIRECTOR } });
       return Response.json({ success: true, data: director }, { status: 201 });
     }

@@ -10,8 +10,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
-    if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.CHECKER].includes(decoded.role)) {
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.CHECKER, UserRole.FINANCE_MANAGER].includes(decoded.role)) {
       throw new AppError('Access denied — checker role required', 403, 'FORBIDDEN');
     }
 
@@ -21,16 +22,19 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       note: z.string().max(500).optional(),
     }).parse(body);
 
-    const tx = await prisma.transaction.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const where = isSuperAdmin ? { id: params.id } : { id: params.id, organizationId: orgId! };
+    const tx = await prisma.transaction.findFirst({ where });
     if (!tx) throw new AppError('Transaction not found', 404, 'NOT_FOUND');
     if (tx.status !== TransactionStatus.PENDING_CHECKER) {
       throw new AppError('Transaction is not pending checker review', 400, 'INVALID_STATUS');
     }
-    if (tx.makerId === decoded.userId) {
+    // Super Admin CAN approve their own transactions (they run the whole platform)
+    if (tx.makerId === decoded.userId && !isSuperAdmin) {
       throw new AppError('Maker cannot approve their own transaction', 403, 'MAKER_CHECKER_VIOLATION');
     }
 
-    const org = await prisma.organization.findUnique({ where: { id: orgId } });
+    const effectiveOrgId = orgId ?? tx.organizationId;
+    const org = await prisma.organization.findUnique({ where: { id: effectiveOrgId } });
 
     if (approvalAction === ApprovalAction.APPROVED) {
       const newStatus = org?.requiresDirectorApproval ? TransactionStatus.PENDING_DIRECTOR : TransactionStatus.PROCESSING;
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         prisma.transaction.update({ where: { id: params.id }, data: { status: newStatus } }),
         prisma.approvalWorkflow.upsert({
           where: { transactionId: params.id },
-          create: { organizationId: orgId, transactionId: params.id, checkerId: decoded.userId, checkerAction: approvalAction, checkerNote: note, checkerAt: new Date() },
+          create: { organizationId: effectiveOrgId, transactionId: params.id, checkerId: decoded.userId, checkerAction: approvalAction, checkerNote: note, checkerAt: new Date() },
           update: { checkerId: decoded.userId, checkerAction: approvalAction, checkerNote: note, checkerAt: new Date() },
         }),
       ]);

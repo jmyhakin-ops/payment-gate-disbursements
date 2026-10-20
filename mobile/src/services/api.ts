@@ -55,36 +55,55 @@ export const paymentsApi = {
   list: (params: Record<string, any>) => apiClient.get('/payments', { params }),
   get: (id: string) => apiClient.get(`/payments/${id}`),
   create: (body: any) => apiClient.post('/payments', body),
-  initiate: (body: any) => apiClient.post('/payments', body),
-  checkerAction: (id: string, action: 'approve' | 'reject', reason?: string) =>
-    apiClient.post(`/payments/${id}/checker-action`, { action, reason }),
+  initiate: (body: any) => apiClient.post('/payments', {
+    ...body,
+    // Normalise field names to what the API expects
+    recipientAccountNo: body.recipientAccountNo ?? body.recipientAccount,
+    recipientBankName:  body.recipientBankName  ?? body.recipientBank,
+    recipientAccount: undefined,
+    recipientBank: undefined,
+  }),
+  checkerAction: (id: string, action: 'approve' | 'reject', noteOrReason?: string) =>
+    apiClient.post(`/payments/${id}/checker-action`, {
+      action: action === 'approve' ? 'APPROVED' : 'REJECTED',
+      note: noteOrReason,
+    }),
   directorAction: (
     id: string,
     action: 'approve' | 'reject',
     pin?: string,
     reason?: string,
     approvedAmount?: number
-  ) => apiClient.post(`/payments/${id}/director-action`, { action, pin, reason, approvedAmount }),
-  cancel: (id: string) => apiClient.post(`/payments/${id}/cancel`),
-  pendingApprovals: () => apiClient.get('/payments', { params: { action: 'pending-approvals' } }),
-  directorApprovals: () => apiClient.get('/payments', { params: { action: 'director-approvals' } }),
+  ) =>
+    apiClient.post(`/payments/${id}/director-action`, {
+      action: action === 'approve' ? 'APPROVED' : 'REJECTED',
+      note: reason,
+      approvedAmount,
+      // pin is stored locally for UI only — not sent to backend (backend validates role)
+    }),
+  cancel: (id: string, reason?: string) =>
+    apiClient.post(`/payments/${id}/cancel`, { reason: reason ?? 'Cancelled by user' }),
+  pendingApprovals: () => apiClient.get('/payments/pending-approvals'),
+  directorApprovals: () => apiClient.get('/payments/director-approvals'),
   dashboard: () => apiClient.get('/payments', { params: { action: 'dashboard' } }),
   pendingCounts: () =>
-    apiClient
-      .get('/payments', { params: { action: 'pending-approvals' } })
-      .then((r) => ({
-        checker: r.data.data?.checkerCount ?? r.data.data?.length ?? 0,
-        director: 0,
-      }))
-      .catch(() => ({ checker: 0, director: 0 })),
+    Promise.all([
+      apiClient.get('/payments/pending-approvals').catch(() => ({ data: { data: [] } })),
+      apiClient.get('/payments/director-approvals').catch(() => ({ data: { data: [] } })),
+    ]).then(([checker, director]) => ({
+      checker: checker.data.data?.length ?? 0,
+      director: director.data.data?.length ?? 0,
+    })),
 };
 
 // ─── Wallets ─────────────────────────────────────────────────────────────────
 export const walletsApi = {
   list: () => apiClient.get('/wallets'),
-  summary: () => apiClient.get('/wallets/summary'),
-  ledger: (id: string, params: Record<string, any>) =>
-    apiClient.get(`/wallets/${id}/ledger`, { params }),
+  summary: () => apiClient.get('/wallets', { params: { action: 'summary' } }),
+  ledger: (walletId: string, params: Record<string, any> = {}) =>
+    apiClient.get('/wallets', { params: { walletId, action: 'ledger', ...params } }),
+  get: (walletId: string) =>
+    apiClient.get('/wallets', { params: { walletId } }),
 };
 
 // ─── Suppliers (POS reads from payment gateway DB) ────────────────────────────
@@ -107,6 +126,12 @@ export const settingsApi = {
    */
   configuredRails: () =>
     apiClient.get('/settings', { params: { section: 'configured-rails' } }),
+
+  /** List API credentials — same data as web app Settings page */
+  listCredentials: () => apiClient.get('/settings/api-credentials'),
+
+  /** List bank accounts */
+  listBankAccounts: () => apiClient.get('/settings/bank-accounts'),
 };
 
 // ─── Users ────────────────────────────────────────────────────────────────────

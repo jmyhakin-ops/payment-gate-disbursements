@@ -8,13 +8,15 @@ import { UserRole } from '@prisma/client';
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
+    const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
-    const cred = await prisma.apiCredential.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const where = isSuperAdmin && !orgId ? { id: params.id } : { id: params.id, organizationId: orgId! };
+    const cred = await prisma.apiCredential.findFirst({ where });
     if (!cred) throw new AppError('Credential not found', 404, 'NOT_FOUND');
 
     const updated = await prisma.apiCredential.update({

@@ -10,7 +10,8 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.DIRECTOR].includes(decoded.role)) {
       throw new AppError('Access denied — director role required', 403, 'FORBIDDEN');
     }
@@ -22,10 +23,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       approvedAmount: z.number().positive().optional(),
     }).parse(body);
 
-    const tx = await prisma.transaction.findFirst({
-      where: { id: params.id, organizationId: orgId, status: TransactionStatus.PENDING_DIRECTOR },
-    });
+    const where = isSuperAdmin
+      ? { id: params.id, status: TransactionStatus.PENDING_DIRECTOR }
+      : { id: params.id, organizationId: orgId!, status: TransactionStatus.PENDING_DIRECTOR };
+    const tx = await prisma.transaction.findFirst({ where });
     if (!tx) throw new AppError('Transaction not found or not pending director approval', 404, 'NOT_FOUND');
+
+    const effectiveOrgId = orgId ?? tx.organizationId;
 
     if (approvalAction === ApprovalAction.APPROVED) {
       const finalAmount = approvedAmount && approvedAmount > 0 && approvedAmount <= Number(tx.amount)

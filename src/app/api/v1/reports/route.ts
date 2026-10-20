@@ -30,24 +30,27 @@ export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId && decoded.role !== UserRole.SUPER_ADMIN) throw new AppError('No organization', 403, 'NO_ORG');
-    const effectiveOrgId = orgId!;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
+    // Super Admin with no org sees platform-wide data; otherwise org-scoped
+    const effectiveOrgId = orgId ?? undefined;
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
 
     if (action === 'reconciliation') {
       const page = parseInt(searchParams.get('page') || '1');
       const limit = parseInt(searchParams.get('limit') || '20');
+      const reconWhere = effectiveOrgId ? { organizationId: effectiveOrgId } : {};
       const [data, total] = await Promise.all([
-        prisma.reconciliation.findMany({ where: { organizationId: effectiveOrgId }, skip: (page - 1) * limit, take: limit, orderBy: { runAt: 'desc' } }),
-        prisma.reconciliation.count({ where: { organizationId: effectiveOrgId } }),
+        prisma.reconciliation.findMany({ where: reconWhere, skip: (page - 1) * limit, take: limit, orderBy: { runAt: 'desc' } }),
+        prisma.reconciliation.count({ where: reconWhere }),
       ]);
       return Response.json({ success: true, data, meta: { total, page, limit } });
     }
 
     const { start, end } = resolveDateRange(searchParams);
 
-    const txWhere = { organizationId: effectiveOrgId, createdAt: { gte: start, lte: end } };
+    const txWhere: any = { createdAt: { gte: start, lte: end }, ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}) };
 
     const [byRail, byStatus, topRecipients, totalAgg, completedAgg, failedAgg, dailyRaw] = await Promise.all([
       prisma.transaction.groupBy({ by: ['rail'], where: txWhere, _count: { _all: true }, _sum: { amount: true } }),
@@ -62,13 +65,21 @@ export async function GET(request: NextRequest) {
       prisma.transaction.aggregate({ where: { ...txWhere, status: TransactionStatus.COMPLETED }, _sum: { amount: true }, _count: { _all: true } }),
       prisma.transaction.aggregate({ where: { ...txWhere, status: TransactionStatus.FAILED }, _sum: { amount: true }, _count: { _all: true } }),
       // Daily volume - raw query for best performance
-      prisma.$queryRawUnsafe<{ date: string; volume: number; count: number }[]>(
-        `SELECT TO_CHAR("createdAt"::date, 'Mon DD') as date, SUM(amount) as volume, COUNT(*) as count
-         FROM transactions
-         WHERE "organizationId" = $1 AND "createdAt" >= $2 AND "createdAt" <= $3
-         GROUP BY "createdAt"::date ORDER BY "createdAt"::date`,
-        effectiveOrgId, start, end
-      ),
+      effectiveOrgId
+        ? prisma.$queryRawUnsafe<{ date: string; volume: number; count: number }[]>(
+            `SELECT TO_CHAR("createdAt"::date, 'Mon DD') as date, SUM(amount) as volume, COUNT(*) as count
+             FROM transactions
+             WHERE "organizationId" = $1 AND "createdAt" >= $2 AND "createdAt" <= $3
+             GROUP BY "createdAt"::date ORDER BY "createdAt"::date`,
+            effectiveOrgId, start, end
+          )
+        : prisma.$queryRawUnsafe<{ date: string; volume: number; count: number }[]>(
+            `SELECT TO_CHAR("createdAt"::date, 'Mon DD') as date, SUM(amount) as volume, COUNT(*) as count
+             FROM transactions
+             WHERE "createdAt" >= $1 AND "createdAt" <= $2
+             GROUP BY "createdAt"::date ORDER BY "createdAt"::date`,
+            start, end
+          ),
     ]);
 
     const successful = completedAgg._count._all;
@@ -113,10 +124,14 @@ export async function POST(request: NextRequest) {
     const decoded = getAuthFromRequest(request);
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.FINANCE_MANAGER].includes(decoded.role)) throw new AppError('Access denied', 403, 'FORBIDDEN');
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
-    const { rail, startDate, endDate } = z.object({ rail: z.string().optional(), startDate: z.string(), endDate: z.string() }).parse(await request.json());
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
+    const body = await request.json();
+    const { rail, startDate, endDate, organizationId: bodyOrgId } = z.object({ rail: z.string().optional(), startDate: z.string(), endDate: z.string(), organizationId: z.string().uuid().optional() }).parse(body);
+    const targetOrgId = bodyOrgId ?? orgId;
+    if (!targetOrgId) throw new AppError('organizationId required', 400, 'MISSING_ORG');
     const start = new Date(startDate); const end = new Date(endDate);
-    const where: any = { organizationId: orgId, createdAt: { gte: start, lte: end }, ...(rail ? { rail } : {}) };
+    const where: any = { organizationId: targetOrgId, createdAt: { gte: start, lte: end }, ...(rail ? { rail } : {}) };
     const [total, completed, failed, pending, amountAgg] = await Promise.all([
       prisma.transaction.count({ where }),
       prisma.transaction.count({ where: { ...where, status: TransactionStatus.COMPLETED } }),
@@ -124,7 +139,7 @@ export async function POST(request: NextRequest) {
       prisma.transaction.count({ where: { ...where, status: { in: [TransactionStatus.PROCESSING, TransactionStatus.PENDING_CHECKER, TransactionStatus.PENDING_DIRECTOR] } } }),
       prisma.transaction.aggregate({ where: { ...where, status: TransactionStatus.COMPLETED }, _sum: { amount: true } }),
     ]);
-    const reconciliation = await prisma.reconciliation.create({ data: { organizationId: orgId, rail: (rail || 'ALL') as any, periodStart: start, periodEnd: end, totalTransactions: total, totalAmount: amountAgg._sum.amount || 0, successCount: completed, failedCount: failed, pendingCount: pending, status: 'completed' } });
+    const reconciliation = await prisma.reconciliation.create({ data: { organizationId: targetOrgId, rail: (rail || 'ALL') as any, periodStart: start, periodEnd: end, totalTransactions: total, totalAmount: amountAgg._sum.amount || 0, successCount: completed, failedCount: failed, pendingCount: pending, status: 'completed' } });
     return Response.json({ success: true, data: reconciliation });
   } catch (err) { return handleApiError(err); }
 }

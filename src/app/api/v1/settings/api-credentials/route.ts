@@ -33,14 +33,17 @@ export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
 
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.FINANCE_MANAGER].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    if (!orgId) throw new AppError('No organization linked to your account. Please contact support.', 403, 'NO_ORG');
+    // Super Admin with no org sees ALL credentials; org-scoped users see their own
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked to your account.', 403, 'NO_ORG');
 
+    const credWhere = orgId ? { organizationId: orgId } : {};
     const creds = await prisma.apiCredential.findMany({
-      where: { organizationId: orgId },
+      where: credWhere,
       orderBy: { type: 'asc' },
     });
 
@@ -61,11 +64,12 @@ export async function POST(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
 
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    if (!orgId) throw new AppError('No organization linked to your account. Please contact support.', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked to your account.', 403, 'NO_ORG');
 
     const body = await request.json();
     const data = z.object({
@@ -74,12 +78,18 @@ export async function POST(request: NextRequest) {
       environment: z.enum(['sandbox', 'production']),
       credentials: z.record(z.string()),
       webhookSecret: z.string().optional(),
+      // Allow passing organizationId for Super Admin to target a specific org
+      organizationId: z.string().uuid().optional(),
     }).parse(body);
+
+    // Super Admin can explicitly target an org; otherwise use their own
+    const targetOrgId = data.organizationId ?? orgId;
+    if (!targetOrgId) throw new AppError('organizationId is required for Super Admin', 400, 'MISSING_ORG');
 
     const encryptedCreds = encrypt(JSON.stringify(data.credentials));
 
     const existing = await prisma.apiCredential.findFirst({
-      where: { organizationId: orgId, type: data.type, environment: data.environment },
+      where: { organizationId: targetOrgId, type: data.type, environment: data.environment },
     });
 
     const result = existing
@@ -90,7 +100,7 @@ export async function POST(request: NextRequest) {
       : await prisma.apiCredential.create({
           data: {
             id: crypto.randomUUID(),
-            organizationId: orgId,
+            organizationId: targetOrgId,
             type: data.type,
             name: data.name,
             environment: data.environment,

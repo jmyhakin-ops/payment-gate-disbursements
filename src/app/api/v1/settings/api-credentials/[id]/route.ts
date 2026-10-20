@@ -19,27 +19,29 @@ function mask(val: string) {
   return val.length > 8 ? val.substring(0, 4) + '****' + val.slice(-4) : '****';
 }
 
-// PUT /api/v1/settings/api-credentials/[id]  — activate / deactivate
+// Helper: build org-scoped where clause (Super Admin can access any credential)
+function credWhere(id: string, orgId: string | null, isSuperAdmin: boolean) {
+  return isSuperAdmin && !orgId ? { id } : { id, organizationId: orgId! };
+}
+
+// PUT /api/v1/settings/api-credentials/[id]  — activate / deactivate / test
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
+    const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
 
-    // GET the credential to verify ownership
-    const cred = await prisma.apiCredential.findFirst({
-      where: { id: params.id, organizationId: orgId },
-    });
+    const cred = await prisma.apiCredential.findFirst({ where: credWhere(params.id, orgId, isSuperAdmin) });
     if (!cred) throw new AppError('Credential not found', 404, 'NOT_FOUND');
 
     if (action === 'test') {
-      // Simulate a test — in production you'd call the actual API
       await prisma.apiCredential.update({
         where: { id: params.id },
         data: { lastTestedAt: new Date(), lastTestStatus: 'success', lastTestMessage: 'Connection test passed', updatedAt: new Date() },
@@ -47,7 +49,6 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return Response.json({ success: true, message: 'Credential test passed' });
     }
 
-    // Default: toggle active / activate
     const updated = await prisma.apiCredential.update({
       where: { id: params.id },
       data: { isActive: !cred.isActive, updatedAt: new Date() },
@@ -60,13 +61,14 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
+    const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
-    await prisma.apiCredential.deleteMany({ where: { id: params.id, organizationId: orgId } });
+    await prisma.apiCredential.deleteMany({ where: credWhere(params.id, orgId, isSuperAdmin) });
     return Response.json({ success: true, message: 'Credential deleted' });
   } catch (err) { return handleApiError(err); }
 }
@@ -75,13 +77,14 @@ export async function DELETE(request: NextRequest, { params }: { params: { id: s
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
+    const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.FINANCE_MANAGER].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
-    const cred = await prisma.apiCredential.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const cred = await prisma.apiCredential.findFirst({ where: credWhere(params.id, orgId, isSuperAdmin) });
     if (!cred) throw new AppError('Not found', 404, 'NOT_FOUND');
 
     let parsedCreds: Record<string, string> = {};

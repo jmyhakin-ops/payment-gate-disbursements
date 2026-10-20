@@ -19,13 +19,15 @@ function decrypt(enc: string) {
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
+    const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN, UserRole.FINANCE_MANAGER].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
-    const cred = await prisma.apiCredential.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const where = isSuperAdmin && !orgId ? { id: params.id } : { id: params.id, organizationId: orgId! };
+    const cred = await prisma.apiCredential.findFirst({ where });
     if (!cred) throw new AppError('Credential not found', 404, 'NOT_FOUND');
 
     let testStatus = 'success';
@@ -33,7 +35,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     try {
       const credentials = JSON.parse(decrypt(cred.credentials));
-      // Basic field presence checks per credential type
       if (cred.type === 'MPESA_DARAJA') {
         if (!credentials.consumerKey || !credentials.consumerSecret || !credentials.passKey || !credentials.shortCode) {
           testStatus = 'failed';
@@ -52,12 +53,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     await prisma.apiCredential.update({
       where: { id: params.id },
-      data: {
-        lastTestedAt: new Date(),
-        lastTestStatus: testStatus,
-        lastTestMessage: testMessage,
-        updatedAt: new Date(),
-      },
+      data: { lastTestedAt: new Date(), lastTestStatus: testStatus, lastTestMessage: testMessage, updatedAt: new Date() },
     });
 
     return Response.json({

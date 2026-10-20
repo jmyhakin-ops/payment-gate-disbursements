@@ -153,17 +153,20 @@ export async function DELETE(request: NextRequest) {
     const decoded = getAuthFromRequest(request);
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) throw new AppError('Access denied', 403, 'FORBIDDEN');
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
     const { searchParams } = new URL(request.url);
     const section = searchParams.get('section');
     const id = searchParams.get('id')!;
 
     if (section === 'api-credentials') {
-      await prisma.apiCredential.deleteMany({ where: { id, organizationId: orgId } });
+      const credWhere = isSuperAdmin && !orgId ? { id } : { id, organizationId: orgId! };
+      await prisma.apiCredential.deleteMany({ where: credWhere });
       return Response.json({ success: true, message: 'Credential deleted' });
     }
     if (section === 'bank-accounts') {
-      await prisma.bankAccount.updateMany({ where: { id, organizationId: orgId }, data: { isActive: false } });
+      const acctWhere = isSuperAdmin && !orgId ? { id } : { id, organizationId: orgId! };
+      await prisma.bankAccount.updateMany({ where: acctWhere, data: { isActive: false } });
       return Response.json({ success: true, message: 'Bank account removed' });
     }
     return Response.json({ success: false, message: 'Unknown section' }, { status: 400 });

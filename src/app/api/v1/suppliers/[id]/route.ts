@@ -3,11 +3,11 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getAuthFromRequest } from '@/lib/auth';
 import { AppError, handleApiError } from '@/lib/errors';
-import { SupplierStatus } from '@prisma/client';
+import { SupplierStatus, UserRole } from '@prisma/client';
 
-function requireOrg(orgId: string | null) {
-  if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
-  return orgId;
+function requireOrg(orgId: string | null, role: UserRole): string {
+  if (!orgId && role !== UserRole.SUPER_ADMIN) throw new AppError('No organization', 403, 'NO_ORG');
+  return orgId!;
 }
 
 const updateSchema = z.object({
@@ -34,7 +34,7 @@ const updateSchema = z.object({
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId);
+    const orgId = requireOrg(decoded.organizationId, decoded.role);
 
     const supplier = await prisma.supplier.findFirst({
       where: { id: params.id, organizationId: orgId },
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId);
+    const orgId = requireOrg(decoded.organizationId, decoded.role);
 
     const existing = await prisma.supplier.findFirst({ where: { id: params.id, organizationId: orgId } });
     if (!existing) throw new AppError('Supplier not found', 404, 'NOT_FOUND');
@@ -96,7 +96,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId);
+    const orgId = requireOrg(decoded.organizationId, decoded.role);
 
     const existing = await prisma.supplier.findFirst({ where: { id: params.id, organizationId: orgId } });
     if (!existing) throw new AppError('Supplier not found', 404, 'NOT_FOUND');

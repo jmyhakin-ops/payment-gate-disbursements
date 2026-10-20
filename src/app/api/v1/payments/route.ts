@@ -14,8 +14,10 @@ export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId && decoded.role !== UserRole.SUPER_ADMIN) throw new AppError('No organization linked', 403, 'NO_ORG');
-    const effectiveOrgId = orgId!;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
+    // Super Admin with no org sees all transactions; otherwise org-scoped
+    const effectiveOrgId = orgId ?? undefined;
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
     const txId = searchParams.get('id');
@@ -23,13 +25,14 @@ export async function GET(request: NextRequest) {
     if (action === 'dashboard') {
       const now = new Date();
       const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const dashWhere = (extra: any = {}) => ({ ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}), ...extra });
       const [totalTx, completedTx, pendingTx, failedTx, amountAgg, wallets] = await Promise.all([
-        prisma.transaction.count({ where: { organizationId: effectiveOrgId, createdAt: { gte: startOfMonth } } }),
-        prisma.transaction.count({ where: { organizationId: effectiveOrgId, status: TransactionStatus.COMPLETED, createdAt: { gte: startOfMonth } } }),
-        prisma.transaction.count({ where: { organizationId: effectiveOrgId, status: { in: [TransactionStatus.PENDING_CHECKER, TransactionStatus.PENDING_DIRECTOR, TransactionStatus.PROCESSING] } } }),
-        prisma.transaction.count({ where: { organizationId: effectiveOrgId, status: TransactionStatus.FAILED, createdAt: { gte: startOfMonth } } }),
-        prisma.transaction.aggregate({ where: { organizationId: effectiveOrgId, status: TransactionStatus.COMPLETED, createdAt: { gte: startOfMonth } }, _sum: { amount: true } }),
-        prisma.wallet.findMany({ where: { organizationId: effectiveOrgId } }),
+        prisma.transaction.count({ where: dashWhere({ createdAt: { gte: startOfMonth } }) }),
+        prisma.transaction.count({ where: dashWhere({ status: TransactionStatus.COMPLETED, createdAt: { gte: startOfMonth } }) }),
+        prisma.transaction.count({ where: dashWhere({ status: { in: [TransactionStatus.PENDING_CHECKER, TransactionStatus.PENDING_DIRECTOR, TransactionStatus.PROCESSING] } }) }),
+        prisma.transaction.count({ where: dashWhere({ status: TransactionStatus.FAILED, createdAt: { gte: startOfMonth } }) }),
+        prisma.transaction.aggregate({ where: dashWhere({ status: TransactionStatus.COMPLETED, createdAt: { gte: startOfMonth } }), _sum: { amount: true } }),
+        prisma.wallet.findMany({ where: effectiveOrgId ? { organizationId: effectiveOrgId } : {} }),
       ]);
       const totalBalance = wallets.reduce((s, w) => s + Number(w.balance), 0);
       return Response.json({ success: true, data: { totalTransactions: totalTx, completedTransactions: completedTx, pendingApprovals: pendingTx, failedTransactions: failedTx, totalAmountProcessed: amountAgg._sum.amount || 0, totalBalance, wallets } });
@@ -78,7 +81,7 @@ export async function GET(request: NextRequest) {
     }
 
     const where: any = {
-      organizationId: effectiveOrgId,
+      ...(effectiveOrgId ? { organizationId: effectiveOrgId } : {}),
       ...(status ? { status: status as TransactionStatus } : {}),
       ...(rail   ? { rail:   rail   as PaymentRail      } : {}),
       ...(type   ? { type:   type   as any              } : {}),
@@ -107,12 +110,14 @@ export async function POST(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId && decoded.role !== UserRole.SUPER_ADMIN) throw new AppError('No organization linked', 403, 'NO_ORG');
-    const effectiveOrgId = orgId!;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
     const body = await request.json();
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
     const txId = searchParams.get('id') ?? searchParams.get('txId');
+    // For Super Admin, allow specifying organizationId in the body when they have no org
+    const effectiveOrgId = orgId ?? (body as any).organizationId;
 
     if (action === 'checker-action' && txId) {
       const { action: approvalAction, note } = z.object({ action: z.nativeEnum(ApprovalAction), note: z.string().max(500).optional() }).parse(body);

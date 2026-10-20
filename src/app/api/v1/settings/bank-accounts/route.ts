@@ -11,12 +11,11 @@ export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
-    const accounts = await prisma.bankAccount.findMany({
-      where: { organizationId: orgId, isActive: true },
-      orderBy: { createdAt: 'desc' },
-    });
+    const where = orgId ? { organizationId: orgId, isActive: true } : { isActive: true };
+    const accounts = await prisma.bankAccount.findMany({ where, orderBy: { createdAt: 'desc' } });
     return Response.json({ success: true, data: accounts });
   } catch (err) { return handleApiError(err); }
 }
@@ -26,7 +25,8 @@ export async function POST(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
@@ -41,10 +41,16 @@ export async function POST(request: NextRequest) {
       swiftCode: z.string().optional(),
       pesaLinkEnabled: z.boolean().default(true),
       rtgsEnabled: z.boolean().default(false),
+      // Super Admin can specify org explicitly
+      organizationId: z.string().uuid().optional(),
     }).parse(body);
 
+    const targetOrgId = data.organizationId ?? orgId;
+    if (!targetOrgId) throw new AppError('organizationId is required', 400, 'MISSING_ORG');
+
+    const { organizationId: _ignored, ...rest } = data;
     const account = await prisma.bankAccount.create({
-      data: { id: crypto.randomUUID(), organizationId: orgId, updatedAt: new Date(), ...data },
+      data: { id: crypto.randomUUID(), organizationId: targetOrgId, updatedAt: new Date(), ...rest },
     });
     return Response.json({ success: true, data: account }, { status: 201 });
   } catch (err) { return handleApiError(err); }

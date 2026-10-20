@@ -3,19 +3,20 @@ import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getAuthFromRequest } from '@/lib/auth';
 import { AppError, handleApiError } from '@/lib/errors';
-import { TransactionStatus } from '@prisma/client';
+import { TransactionStatus, UserRole } from '@prisma/client';
 
 // POST /api/v1/payments/[id]/cancel
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
     const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
     const body = await request.json();
     const { reason } = z.object({ reason: z.string().min(5, 'Cancellation reason required (min 5 chars)') }).parse(body);
 
-    const tx = await prisma.transaction.findFirst({ where: { id: params.id, organizationId: orgId } });
+    const tx = await prisma.transaction.findFirst({ where: { id: params.id, ...(isSuperAdmin && !orgId ? {} : { organizationId: orgId! }) } });
     if (!tx) throw new AppError('Transaction not found', 404, 'NOT_FOUND');
 
     const cancellableStatuses = [TransactionStatus.DRAFT, TransactionStatus.PENDING_CHECKER, TransactionStatus.PENDING_DIRECTOR];

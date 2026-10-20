@@ -72,10 +72,14 @@ export default function NewPaymentScreen() {
 
   const mutation = useMutation({
     mutationFn: () => paymentsApi.initiate({
-      walletId, rail, amount: numAmount,
-      recipientName, recipientPhone: isMpesa ? recipientPhone : undefined,
-      recipientAccount: !isMpesa ? recipientAccount : undefined,
-      recipientBank, description,
+      walletId,
+      rail,
+      amount: numAmount,
+      description: description || 'Mobile payment',
+      recipientName,
+      recipientPhone:     isMpesa ? recipientPhone    : undefined,
+      recipientAccountNo: !isMpesa ? recipientAccount : undefined,
+      recipientBankName:  !isMpesa ? recipientBank    : undefined,
     }),
     onSuccess: (res) => {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

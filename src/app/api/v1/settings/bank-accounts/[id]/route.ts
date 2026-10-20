@@ -8,16 +8,15 @@ import { UserRole } from '@prisma/client';
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const decoded = getAuthFromRequest(request);
+    const orgId = decoded.organizationId;
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
     if (![UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN].includes(decoded.role)) {
       throw new AppError('Access denied', 403, 'FORBIDDEN');
     }
-    const orgId = decoded.organizationId;
-    if (!orgId) throw new AppError('No organization linked', 403, 'NO_ORG');
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization linked', 403, 'NO_ORG');
 
-    await prisma.bankAccount.updateMany({
-      where: { id: params.id, organizationId: orgId },
-      data: { isActive: false },
-    });
+    const where = isSuperAdmin && !orgId ? { id: params.id } : { id: params.id, organizationId: orgId! };
+    await prisma.bankAccount.updateMany({ where, data: { isActive: false } });
     return Response.json({ success: true, message: 'Bank account removed' });
   } catch (err) { return handleApiError(err); }
 }
