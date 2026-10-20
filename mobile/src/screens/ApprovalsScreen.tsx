@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, TextInput, RefreshControl,
-  Modal, Animated, Dimensions, Platform,
+  Modal, Animated, Dimensions, Platform, SafeAreaView, KeyboardAvoidingView,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
@@ -78,28 +78,32 @@ function DirectorApprovalModal({
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={onClose}>
-      <View style={s.overlay}>
-        <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }] }]}>
-          <View style={s.handle} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <View style={s.overlay}>
+          <Animated.View style={[s.sheet, { transform: [{ translateY: slideAnim }] }]}>
+            <View style={s.handle} />
 
-          {/* Header gradient */}
-          <LinearGradient
-            colors={mode === 'approve' ? ['#0c2340', '#0f3460'] : ['#2d0f1e', '#3a0d1a']}
-            style={s.sheetHeader}
-          >
-            <View style={[s.sheetHeaderIcon, { backgroundColor: mode === 'approve' ? '#1e40af' : '#9f1239' }]}>
-              <Ionicons name={mode === 'approve' ? 'shield-checkmark' : 'close-circle'} size={26} color="#fff" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.sheetHeaderTitle}>
-                {mode === 'approve' ? 'Director Authorization' : 'Reject Payment'}
-              </Text>
-              <Text style={s.sheetHeaderRef} numberOfLines={1}>{payment.reference}</Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={s.sheetCloseBtn}>
-              <Ionicons name="close" size={20} color="#94a3b8" />
-            </TouchableOpacity>
-          </LinearGradient>
+            {/* Header gradient */}
+            <LinearGradient
+              colors={mode === 'approve' ? ['#0c2340', '#0f3460'] : ['#2d0f1e', '#3a0d1a']}
+              style={s.sheetHeader}
+            >
+              <View style={[s.sheetHeaderIcon, { backgroundColor: mode === 'approve' ? '#1e40af' : '#9f1239' }]}>
+                <Ionicons name={mode === 'approve' ? 'shield-checkmark' : 'close-circle'} size={26} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.sheetHeaderTitle}>
+                  {mode === 'approve' ? 'Director Authorization' : 'Reject Payment'}
+                </Text>
+                <Text style={s.sheetHeaderRef} numberOfLines={1}>{payment.reference}</Text>
+              </View>
+              <TouchableOpacity onPress={onClose} style={s.sheetCloseBtn}>
+                <Ionicons name="close" size={20} color="#94a3b8" />
+              </TouchableOpacity>
+            </LinearGradient>
 
           <ScrollView style={s.sheetBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
@@ -161,7 +165,7 @@ function DirectorApprovalModal({
                     <Ionicons name="create-outline" size={18} color={useCustomAmount ? '#10b981' : '#475569'} />
                     <Text style={[s.amountToggleLabel, useCustomAmount && { color: '#10b981' }]}>Custom Amount</Text>
                     <Text style={[s.amountToggleValue, useCustomAmount && { color: '#10b981' }]}>
-                      {useCustomAmount && parsedCustom > 0 ? formatKES(parsedCustom) : 'Enter amount →'}
+                      {useCustomAmount && parsedCustom > 0 ? formatKES(parsedCustom) : 'Enter amount >'}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -314,6 +318,7 @@ function DirectorApprovalModal({
           </View>
         </Animated.View>
       </View>
+    </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -483,6 +488,7 @@ function CheckerModal({
           </View>
         </Animated.View>
       </View>
+    </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -646,7 +652,8 @@ export default function ApprovalsScreen() {
   const directorCount = directorData?.length ?? 0;
 
   return (
-    <View style={s.root}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#0f172a' }}>
+      <View style={s.root}>
       {/* Header */}
       <LinearGradient colors={['#0f172a', '#1e293b']} style={s.header}>
         <View>
@@ -800,6 +807,7 @@ export default function ApprovalsScreen() {
         onSubmit={(id, action, reason) => checkerMutation.mutate({ id, action, reason })}
       />
     </View>
+    </SafeAreaView>
   );
 }
 
@@ -809,7 +817,7 @@ export default function ApprovalsScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 20,
+    paddingTop: 16, paddingBottom: 16, paddingHorizontal: 20,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
     backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
   },
@@ -870,7 +878,15 @@ const s = StyleSheet.create({
 
   // Bottom sheet modal
   overlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'flex-end' },
-  sheet: { backgroundColor: '#ffffff', borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '94%', borderWidth: 1, borderColor: '#e2e8f0' },
+  sheet: {
+    backgroundColor: '#ffffff',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    maxHeight: '92%',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
+  },
   handle: { width: 44, height: 5, backgroundColor: '#cbd5e1', borderRadius: 3, alignSelf: 'center', marginTop: 10, marginBottom: 6 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 18, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   sheetHeaderIcon: { width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
@@ -878,7 +894,7 @@ const s = StyleSheet.create({
   sheetHeaderRef: { color: '#64748b', fontSize: 12, marginTop: 2, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   sheetCloseBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
   sheetBody: { padding: 18 },
-  sheetFooter: { flexDirection: 'row', gap: 12, padding: 18, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  sheetFooter: { flexDirection: 'row', gap: 12, paddingHorizontal: 18, paddingTop: 14, paddingBottom: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9', backgroundColor: '#ffffff' },
 
   // Summary card
   summaryCard: { backgroundColor: '#f8fafc', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#e2e8f0' },

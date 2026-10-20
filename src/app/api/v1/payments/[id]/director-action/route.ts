@@ -26,34 +26,56 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const where = isSuperAdmin
       ? { id: params.id, status: TransactionStatus.PENDING_DIRECTOR }
       : { id: params.id, organizationId: orgId!, status: TransactionStatus.PENDING_DIRECTOR };
-    const tx = await prisma.transaction.findFirst({ where });
-    if (!tx) throw new AppError('Transaction not found or not pending director approval', 404, 'NOT_FOUND');
 
-    const effectiveOrgId = orgId ?? tx.organizationId;
+    // Include wallet to ensure walletId exists
+    const tx = await prisma.transaction.findFirst({ where, include: { wallet: true } });
+    if (!tx) throw new AppError('Transaction not found or not pending director approval', 404, 'NOT_FOUND');
 
     if (approvalAction === ApprovalAction.APPROVED) {
       const finalAmount = approvedAmount && approvedAmount > 0 && approvedAmount <= Number(tx.amount)
         ? approvedAmount : Number(tx.amount);
 
+      // Record director approval in workflow if one exists
       const workflow = await prisma.approvalWorkflow.findUnique({ where: { transactionId: params.id } });
       if (workflow) {
         await prisma.directorApproval.create({
           data: { workflowId: workflow.id, directorId: decoded.userId, action: approvalAction, note },
         });
       }
-      if (finalAmount < Number(tx.amount)) {
+
+      if (finalAmount < Number(tx.amount) && tx.walletId) {
+        // Partial approval — release the difference back to wallet
         const diff = Number(tx.amount) - finalAmount;
         await prisma.$transaction([
-          prisma.transaction.update({ where: { id: params.id }, data: { amount: finalAmount, netAmount: finalAmount, status: TransactionStatus.PROCESSING } }),
-          prisma.wallet.update({ where: { id: tx.walletId }, data: { reservedBalance: { decrement: diff }, balance: { increment: diff } } }),
+          prisma.transaction.update({
+            where: { id: params.id },
+            data: { amount: finalAmount, netAmount: finalAmount, status: TransactionStatus.PROCESSING },
+          }),
+          prisma.wallet.update({
+            where: { id: tx.walletId },
+            data: { reservedBalance: { decrement: diff }, balance: { increment: diff } },
+          }),
         ]);
       } else {
-        await prisma.transaction.update({ where: { id: params.id }, data: { status: TransactionStatus.PROCESSING } });
+        // Full amount — just move to PROCESSING
+        await prisma.transaction.update({
+          where: { id: params.id },
+          data: { status: TransactionStatus.PROCESSING },
+        });
       }
       return Response.json({ success: true, message: 'Director approval recorded — payment queued for processing' });
     } else {
-      await prisma.transaction.update({ where: { id: params.id }, data: { status: TransactionStatus.REJECTED, failureReason: note } });
-      await prisma.wallet.update({ where: { id: tx.walletId }, data: { reservedBalance: { decrement: tx.netAmount }, balance: { increment: tx.netAmount } } });
+      // REJECTED — release full reserved balance back to wallet
+      await prisma.transaction.update({
+        where: { id: params.id },
+        data: { status: TransactionStatus.REJECTED, failureReason: note },
+      });
+      if (tx.walletId) {
+        await prisma.wallet.update({
+          where: { id: tx.walletId },
+          data: { reservedBalance: { decrement: tx.netAmount ?? tx.amount }, balance: { increment: tx.netAmount ?? tx.amount } },
+        });
+      }
       return Response.json({ success: true, message: 'Transaction rejected by director' });
     }
   } catch (err) { return handleApiError(err); }
