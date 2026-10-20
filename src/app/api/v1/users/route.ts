@@ -163,34 +163,46 @@ export async function POST(request: NextRequest) {
       // Check duplicate invitation or existing user
       const existing = await prisma.user.findUnique({ where: { email: data.email } });
       if (existing) throw new AppError('A user with this email already exists', 409, 'USER_EXISTS');
+
+      // If a pending invite already exists — resend it instead of blocking
       const pendingInvite = await prisma.userInvitation.findFirst({
         where: { email: data.email, acceptedAt: null, expiresAt: { gt: new Date() } },
       });
-      if (pendingInvite) throw new AppError('An active invitation already exists for this email', 409, 'INVITE_EXISTS');
 
-      const token = crypto.randomBytes(32).toString('hex');
-      const invitation = await prisma.userInvitation.create({
-        data: {
-          organizationId: orgId,
-          invitedById: decoded.userId,
-          email: data.email,
-          role: data.role,
-          token,
-          expiresAt: new Date(Date.now() + 48 * 3600000),
-        },
-      });
+      let invitation = pendingInvite;
+      if (!invitation) {
+        // Create new invitation
+        const token = crypto.randomBytes(32).toString('hex');
+        invitation = await prisma.userInvitation.create({
+          data: {
+            organizationId: orgId,
+            invitedById: decoded.userId,
+            email: data.email,
+            role: data.role,
+            token,
+            expiresAt: new Date(Date.now() + 48 * 3600000),
+          },
+        });
+      } else {
+        // Extend expiry by 48 hours from now on resend
+        invitation = await prisma.userInvitation.update({
+          where: { id: invitation.id },
+          data: { expiresAt: new Date(Date.now() + 48 * 3600000) },
+        });
+      }
 
       // Send invitation email via SMTP
-      const emailResult = await sendInvitationEmail(orgId, data.email, token, data.role);
+      const emailResult = await sendInvitationEmail(orgId, data.email, invitation.token, data.role);
 
-      const acceptUrl = `${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://payment-gate-disbursements.vercel.app'}/accept-invitation?token=${token}`;
+      const acceptUrl = `${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://payment-gate-disbursements.vercel.app'}/accept-invitation?token=${invitation.token}`;
+      const wasResent = !!pendingInvite;
 
       return Response.json({
         success: true,
         message: emailResult.sent
-          ? `Invitation email sent to ${data.email}`
-          : `Invitation created (email not sent: ${emailResult.reason}). Share this link manually.`,
-        data: { id: invitation.id, token, acceptUrl, emailSent: emailResult.sent },
+          ? `Invitation ${wasResent ? 'resent' : 'sent'} successfully to ${data.email}`
+          : `Invitation saved — email not sent: ${emailResult.reason}. Share the link below manually.`,
+        data: { id: invitation.id, token: invitation.token, acceptUrl, emailSent: emailResult.sent, wasResent },
       }, { status: 201 });
     }
 
