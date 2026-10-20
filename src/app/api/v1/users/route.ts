@@ -6,6 +6,82 @@ import { AppError, handleApiError } from '@/lib/errors';
 import { UserRole, UserStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
+
+// ─── Decrypt SMTP credentials ─────────────────────────────────────────────────
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'kenyapay-default-key-32-chars-pad';
+
+function decryptCreds(enc: string): Record<string, string> {
+  try {
+    const [ivHex, encrypted] = enc.split(':');
+    const key = crypto.scryptSync(ENCRYPTION_KEY, 'salt', 32);
+    const decipher = crypto.createDecipheriv('aes-256-cbc', key, Buffer.from(ivHex, 'hex'));
+    const plain = decipher.update(encrypted, 'hex', 'utf8') + decipher.final('utf8');
+    return JSON.parse(plain);
+  } catch { return {}; }
+}
+
+// ─── Send invitation email via saved SMTP settings ────────────────────────────
+async function sendInvitationEmail(orgId: string, toEmail: string, token: string, role: string) {
+  try {
+    const smtpCred = await prisma.apiCredential.findFirst({
+      where: { organizationId: orgId, type: 'SMTP_EMAIL', isActive: true },
+    });
+    if (!smtpCred) {
+      // Try any SMTP cred even if not marked active
+      const anySmtp = await prisma.apiCredential.findFirst({
+        where: { organizationId: orgId, type: 'SMTP_EMAIL' },
+      });
+      if (!anySmtp) return { sent: false, reason: 'No SMTP credentials configured. Please configure Email (SMTP) in Settings.' };
+      const creds = decryptCreds(anySmtp.credentials as string);
+      return await doSendEmail(creds, toEmail, token, role);
+    }
+    const creds = decryptCreds(smtpCred.credentials as string);
+    return await doSendEmail(creds, toEmail, token, role);
+  } catch (e: any) {
+    return { sent: false, reason: e.message };
+  }
+}
+
+async function doSendEmail(creds: Record<string, string>, toEmail: string, token: string, role: string) {
+  const host = creds.host || creds.smtpHost;
+  const port = parseInt(creds.port || creds.smtpPort || '587');
+  const user = creds.username || creds.user || creds.email;
+  const pass = creds.password || creds.pass || creds.appToken;
+  const fromName = creds.fromName || 'KenyaPay';
+  const fromEmail = creds.fromEmail || user;
+
+  if (!host || !user || !pass) return { sent: false, reason: 'Incomplete SMTP settings (host/username/password required).' };
+
+  const transporter = nodemailer.createTransport({
+    host,
+    port,
+    secure: port === 465,
+    auth: { user, pass },
+    tls: { rejectUnauthorized: false },
+  });
+
+  const acceptUrl = `${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://payment-gate-disbursements.vercel.app'}/accept-invitation?token=${token}`;
+
+  await transporter.sendMail({
+    from: `"${fromName}" <${fromEmail}>`,
+    to: toEmail,
+    subject: `You're invited to join KenyaPay as ${role}`,
+    html: `
+      <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;border:1px solid #e5e7eb;border-radius:12px">
+        <h2 style="color:#4f46e5;margin-bottom:8px">You're invited to KenyaPay 🎉</h2>
+        <p style="color:#374151">You have been invited to join the platform as <strong>${role}</strong>.</p>
+        <p style="color:#374151">Click the button below to accept your invitation and set your password. This link expires in <strong>48 hours</strong>.</p>
+        <a href="${acceptUrl}" style="display:inline-block;margin:20px 0;padding:14px 28px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Accept Invitation</a>
+        <p style="color:#6b7280;font-size:13px">Or paste this link in your browser:<br/><span style="color:#4f46e5">${acceptUrl}</span></p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>
+        <p style="color:#9ca3af;font-size:12px">If you did not expect this invitation, you can safely ignore this email.</p>
+      </div>
+    `,
+  });
+
+  return { sent: true };
+}
 
 function requireRole(role: UserRole, ...allowed: UserRole[]) {
   if (!allowed.includes(role)) throw new AppError('Access denied', 403, 'FORBIDDEN');
@@ -65,16 +141,57 @@ export async function POST(request: NextRequest) {
 
     if (action === 'invite') {
       requireRole(decoded.role, UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN);
-      const data = z.object({ email: z.string().email(), role: z.nativeEnum(UserRole), department: z.string().optional(), jobTitle: z.string().optional() }).parse(body);
-      const orgId = decoded.organizationId;
+      const data = z.object({
+        email: z.string().email(),
+        role: z.nativeEnum(UserRole),
+        department: z.string().optional(),
+        jobTitle: z.string().optional(),
+        organizationId: z.string().uuid().optional(),
+      }).parse(body);
+
+      const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+      // Determine target org: body.organizationId (SA can pass it) or decoded org
+      let orgId = data.organizationId ?? decoded.organizationId;
+      if (!orgId && isSuperAdmin) {
+        // Super Admin: auto-pick first org in system
+        const firstOrg = await prisma.organization.findFirst({ orderBy: { createdAt: 'asc' } });
+        if (!firstOrg) throw new AppError('No organization found. Create an organization first.', 400, 'NO_ORG');
+        orgId = firstOrg.id;
+      }
       if (!orgId) throw new AppError('No organization', 403, 'NO_ORG');
+
+      // Check duplicate invitation or existing user
       const existing = await prisma.user.findUnique({ where: { email: data.email } });
-      if (existing) throw new AppError('User already exists', 409, 'USER_EXISTS');
+      if (existing) throw new AppError('A user with this email already exists', 409, 'USER_EXISTS');
+      const pendingInvite = await prisma.userInvitation.findFirst({
+        where: { email: data.email, acceptedAt: null, expiresAt: { gt: new Date() } },
+      });
+      if (pendingInvite) throw new AppError('An active invitation already exists for this email', 409, 'INVITE_EXISTS');
+
       const token = crypto.randomBytes(32).toString('hex');
       const invitation = await prisma.userInvitation.create({
-        data: { organizationId: orgId, invitedById: decoded.userId, email: data.email, role: data.role, token, expiresAt: new Date(Date.now() + 48 * 3600000) },
+        data: {
+          organizationId: orgId,
+          invitedById: decoded.userId,
+          email: data.email,
+          role: data.role,
+          token,
+          expiresAt: new Date(Date.now() + 48 * 3600000),
+        },
       });
-      return Response.json({ success: true, message: `Invitation sent to ${data.email}`, data: { id: invitation.id, token } }, { status: 201 });
+
+      // Send invitation email via SMTP
+      const emailResult = await sendInvitationEmail(orgId, data.email, token, data.role);
+
+      const acceptUrl = `${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://payment-gate-disbursements.vercel.app'}/accept-invitation?token=${token}`;
+
+      return Response.json({
+        success: true,
+        message: emailResult.sent
+          ? `Invitation email sent to ${data.email}`
+          : `Invitation created (email not sent: ${emailResult.reason}). Share this link manually.`,
+        data: { id: invitation.id, token, acceptUrl, emailSent: emailResult.sent },
+      }, { status: 201 });
     }
 
     if (action === 'accept-invitation') {

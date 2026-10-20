@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getAuthFromRequest } from '@/lib/auth';
 import { AppError, handleApiError } from '@/lib/errors';
 import { ApprovalAction, TransactionStatus, UserRole } from '@prisma/client';
+import { notifyDirectorsForApproval, notifyMakerOfDecision } from '@/lib/notifications';
 
 // POST /api/v1/payments/[id]/checker-action
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -107,6 +108,20 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
         ? `Approved with modified amount KES ${finalAmount} — ${org?.requiresDirectorApproval ? 'sent to director' : 'queued for processing'}`
         : org?.requiresDirectorApproval ? 'Approved — sent to director' : 'Approved — queued for processing';
 
+      // Create notifications for directors if sent to director approval
+      if (newStatus === TransactionStatus.PENDING_DIRECTOR) {
+        const supplier = tx.recipientName || 'Unknown Supplier';
+        const amt = finalAmount ?? originalAmount;
+        notifyDirectorsForApproval({
+          transactionId: params.id,
+          organizationId: effectiveOrgId,
+          amount: amt,
+          supplierName: supplier,
+          reference: tx.reference ?? undefined,
+          message: `Payment of KES ${amt.toLocaleString()} to ${supplier} needs your approval. Ref: ${tx.reference ?? 'N/A'}`,
+        });
+      }
+
       return Response.json({ success: true, message: msg, data: { approvedAmount: finalAmount ?? originalAmount } });
     } else {
       // REJECTED or RETURNED
@@ -121,6 +136,24 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           });
         }
       }
+
+      // Notify maker of the decision
+      if (tx.makerId) {
+        const maker = await prisma.user.findUnique({ where: { id: tx.makerId }, select: { email: true } });
+        if (maker) {
+          const decision = approvalAction === ApprovalAction.RETURNED ? 'returned' : 'rejected';
+          notifyMakerOfDecision({
+            transactionId: params.id,
+            organizationId: effectiveOrgId,
+            makerId: tx.makerId,
+            makerEmail: maker.email,
+            decision,
+            message: `Your payment of KES ${Number(tx.amount).toLocaleString()} to ${tx.recipientName ?? 'supplier'} was ${decision}. ${note ? 'Reason: ' + note : ''}`,
+            amount: Number(tx.amount),
+          });
+        }
+      }
+
       return Response.json({ success: true, message: `Transaction ${approvalAction.toLowerCase()}` });
     }
   } catch (err) { return handleApiError(err); }

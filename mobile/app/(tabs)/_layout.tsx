@@ -1,6 +1,9 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View, Text, Platform } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
+import { paymentsApi } from '../../src/services/api';
+import { useAuthStore } from '../../src/store/auth.store';
 
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -41,6 +44,21 @@ function TabIcon({ name, outlineName, label, focused, color, badge }: TabIconPro
 }
 
 export default function TabsLayout() {
+  const { user } = useAuthStore();
+  const role = user?.role;
+  const isDirectorOrAbove = ['SUPER_ADMIN', 'ORG_ADMIN', 'DIRECTOR', 'CHECKER', 'FINANCE_MANAGER'].includes(role ?? '');
+
+  // Poll pending approvals count every 30s for badge
+  const { data: pendingCounts } = useQuery({
+    queryKey: ['pending-counts-tab'],
+    queryFn: () => paymentsApi.pendingCounts(),
+    enabled: isDirectorOrAbove,
+    refetchInterval: 30000,
+  });
+
+  const checkerPending = pendingCounts?.checker ?? 0;
+  const directorPending = pendingCounts?.director ?? 0;
+  const approvalBadge = checkerPending + directorPending;
   return (
     <Tabs
       screenOptions={{
@@ -101,6 +119,7 @@ export default function TabsLayout() {
               label="Approvals"
               focused={focused}
               color={color}
+              badge={approvalBadge}
             />
           ),
         }}

@@ -134,21 +134,36 @@ export default function ApiCredentialsPage() {
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; message: string }>>({});
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
+  // Map DB type back to frontend rail key
+  const REVERSE_TYPE_MAP: Record<string, string> = {
+    MPESA_DARAJA:     'MPESA_B2C',
+    PESALINK:         'PESALINK',
+    EQUITY_JENGA:     'EQUITY_JENGA',
+    KCB_OPEN_BANKING: 'KCB_OPENBANKING',
+    AFRICAS_TALKING:  'AFRICAS_TALKING',
+    SMTP_EMAIL:       'SMTP',
+  };
+
   const { data: credentialsData, isLoading } = useQuery({
     queryKey: ['api-credentials'],
     queryFn: () => api.get('/settings/api-credentials').then(r => r.data.data),
     onSuccess: (data: any[]) => {
       const f: Record<string, Record<string, string>> = {};
       data.forEach((cred: any) => {
-        if (cred.rail && cred.credentials) {
-          f[cred.rail] = cred.credentials;
+        const railKey = cred.rail || REVERSE_TYPE_MAP[cred.type] || cred.type;
+        if (railKey && cred.credentials) {
+          f[railKey] = cred.credentials;
         }
       });
       setForms(f);
     },
   });
 
-  const credentials: any[] = credentialsData ?? [];
+  // Normalize credentials to include rail key for sidebar status
+  const credentials: any[] = (credentialsData ?? []).map((c: any) => ({
+    ...c,
+    rail: c.rail || REVERSE_TYPE_MAP[c.type] || c.type,
+  }));
 
   const saveMutation = useMutation({
     mutationFn: ({ rail, creds }: { rail: string; creds: Record<string, string> }) => {
@@ -160,6 +175,7 @@ export default function ApiCredentialsPage() {
         EQUITY_JENGA:     'EQUITY_JENGA',
         KCB_OPENBANKING:  'KCB_OPEN_BANKING',
         AFRICAS_TALKING:  'AFRICAS_TALKING',
+        SMTP:             'SMTP_EMAIL',
         EMAIL_SMTP:       'SMTP_EMAIL',
       };
       const railConfig = RAILS.find(r => r.key === rail);

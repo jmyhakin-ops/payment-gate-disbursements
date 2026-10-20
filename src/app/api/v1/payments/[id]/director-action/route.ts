@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { getAuthFromRequest } from '@/lib/auth';
 import { AppError, handleApiError } from '@/lib/errors';
 import { ApprovalAction, TransactionStatus, UserRole } from '@prisma/client';
+import { notifyMakerOfDecision } from '@/lib/notifications';
 
 // POST /api/v1/payments/[id]/director-action
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
@@ -69,6 +70,21 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           data: { status: TransactionStatus.PROCESSING },
         });
       }
+      // Notify maker their payment was approved by director
+      if (tx.makerId) {
+        const maker = await prisma.user.findUnique({ where: { id: tx.makerId }, select: { email: true } });
+        if (maker) {
+          notifyMakerOfDecision({
+            transactionId: params.id,
+            organizationId: tx.organizationId,
+            makerId: tx.makerId,
+            makerEmail: maker.email,
+            decision: 'approved',
+            message: `Your payment of KES ${finalAmount.toLocaleString()} to ${tx.recipientName ?? 'supplier'} has been approved by Director and is now processing.`,
+            amount: finalAmount,
+          });
+        }
+      }
       return Response.json({ success: true, message: 'Director approval recorded — payment queued for processing' });
     } else {
       // REJECTED — release full reserved balance back to wallet
@@ -82,6 +98,23 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           data: { reservedBalance: { decrement: tx.netAmount ?? tx.amount }, balance: { increment: tx.netAmount ?? tx.amount } },
         });
       }
+
+      // Notify maker of rejection
+      if (tx.makerId) {
+        const maker = await prisma.user.findUnique({ where: { id: tx.makerId }, select: { email: true } });
+        if (maker) {
+          notifyMakerOfDecision({
+            transactionId: params.id,
+            organizationId: tx.organizationId,
+            makerId: tx.makerId,
+            makerEmail: maker.email,
+            decision: 'rejected',
+            message: `Your payment of KES ${Number(tx.amount).toLocaleString()} to ${tx.recipientName ?? 'supplier'} was rejected by Director. ${note ? 'Reason: ' + note : ''}`,
+            amount: Number(tx.amount),
+          });
+        }
+      }
+
       return Response.json({ success: true, message: 'Transaction rejected by director' });
     }
   } catch (err) { return handleApiError(err); }

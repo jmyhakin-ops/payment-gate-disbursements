@@ -102,14 +102,21 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
   const { toast } = useToast();
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', role: 'MAKER', department: '', jobTitle: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [acceptUrl, setAcceptUrl] = useState('');
 
   const mutation = useMutation({
     mutationFn: () => api.post('/users?action=invite', { email: form.email, role: form.role, department: form.department, jobTitle: form.jobTitle }),
-    onSuccess: () => {
-      toast({ type: 'success', title: 'Invitation Sent!', description: `Invite emailed to ${form.email}` });
-      onSuccess();
-      onClose();
-      setForm({ email: '', firstName: '', lastName: '', role: 'MAKER', department: '', jobTitle: '' });
+    onSuccess: (res: any) => {
+      const d = res?.data;
+      if (d?.emailSent === false && d?.acceptUrl) {
+        setAcceptUrl(d.acceptUrl);
+        toast({ type: 'warning', title: 'Invitation Saved — Email Not Sent', description: d?.message ?? 'Configure SMTP in Settings to send emails.' });
+      } else {
+        toast({ type: 'success', title: 'Invitation Sent!', description: `Invite emailed to ${form.email}` });
+        onSuccess();
+        onClose();
+        setForm({ email: '', firstName: '', lastName: '', role: 'MAKER', department: '', jobTitle: '' });
+      }
     },
     onError: (e: any) => toast({ type: 'error', title: 'Failed to Invite', description: e?.response?.data?.message ?? 'Please try again.' }),
   });
@@ -117,7 +124,7 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
   const validate = () => {
     const errs: Record<string, string> = {};
     if (!form.email) errs.email = 'Email is required';
-    if (!form.email.includes('@')) errs.email = 'Enter a valid email';
+    else if (!form.email.includes('@')) errs.email = 'Enter a valid email';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -127,8 +134,9 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between p-6 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
               <UserPlus className="w-5 h-5 text-indigo-600" />
@@ -143,7 +151,8 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
           </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        {/* Scrollable body */}
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
           {/* Email */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1.5">Email Address *</label>
@@ -181,7 +190,7 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
           {/* Role selector */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-2">Assign Role *</label>
-            <div className="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 gap-2">
               {ROLES.filter((r) => !['SUPER_ADMIN'].includes(r.value)).map((role) => (
                 <button
                   key={role.value}
@@ -196,7 +205,7 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
                   <span className={cn('w-3 h-3 rounded-full flex-shrink-0', role.dot)} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-800">{role.label}</p>
-                    <p className="text-xs text-gray-500 truncate">{role.description}</p>
+                    <p className="text-xs text-gray-500">{role.description}</p>
                   </div>
                   {form.role === role.value && <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0" />}
                 </button>
@@ -211,9 +220,24 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
               <span><strong>{selectedRole.label}:</strong> {selectedRole.description}</span>
             </div>
           )}
+
+          {/* Manual invite link (shown when email not sent) */}
+          {acceptUrl && (
+            <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-sm">
+              <p className="font-semibold text-amber-800 mb-1">📧 Email not sent — share this link manually:</p>
+              <input
+                readOnly
+                value={acceptUrl}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-xs text-amber-900 font-mono cursor-pointer"
+              />
+              <p className="text-amber-700 text-xs mt-1">Tip: Configure Email (SMTP) in Settings → API Credentials to send emails automatically.</p>
+            </div>
+          )}
         </div>
 
-        <div className="flex gap-3 p-6 border-t border-gray-100">
+        {/* Footer — always visible */}
+        <div className="flex gap-3 p-6 border-t border-gray-100 flex-shrink-0">
           <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">
             Cancel
           </button>

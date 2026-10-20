@@ -122,11 +122,55 @@ export function DashboardLayout() {
     refetchInterval: 30000,
   });
 
+  const prevNotifCount = useRef(0);
+
   const { data: notifCount } = useQuery({
     queryKey: ['notif-count'],
     queryFn: () => api.get('/users/notifications?unreadOnly=true&limit=1').then(r => r.data.meta?.unreadCount ?? 0).catch(() => 0),
-    refetchInterval: 60000,
+    refetchInterval: 15000, // check every 15 seconds for faster notifications
   });
+
+  // Play notification sound when new notifications arrive
+  useEffect(() => {
+    if (typeof notifCount === 'number' && notifCount > prevNotifCount.current && prevNotifCount.current >= 0) {
+      // Play a notification sound using Web Audio API
+      try {
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const playTone = (freq: number, start: number, dur: number) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(0.3, ctx.currentTime + start);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + start + dur);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + start);
+          osc.stop(ctx.currentTime + start + dur);
+        };
+        // Two-tone chime
+        playTone(880, 0, 0.15);
+        playTone(1174, 0.15, 0.25);
+      } catch {}
+
+      // Also show browser notification if permission granted
+      if (Notification.permission === 'granted') {
+        new Notification('KenyaPay — New Notification', {
+          body: 'You have a new notification requiring attention.',
+          icon: '/favicon.ico',
+          tag: 'kenyapay-notif',
+        });
+      }
+    }
+    prevNotifCount.current = notifCount ?? 0;
+  }, [notifCount]);
+
+  // Request browser notification permission on mount
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   const navGroups: NavGroup[] = [
     {
