@@ -1,21 +1,29 @@
 import { useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { paymentsApi } from '@/services/api';
 import { useAuthStore } from '@/store/auth.store';
 import { formatCurrency, formatDateTime, statusColors, railLabels, cn, extractApiError } from '@/lib/utils';
-import { ArrowLeft, CheckCircle, XCircle, RotateCcw, User, Wallet, Clock, Shield, AlertTriangle, Loader2, FileText } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, RotateCcw, User, Wallet, Clock, Shield, AlertTriangle, Loader2, FileText, Edit3 } from 'lucide-react';
 
 export default function PaymentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { user, canApprove, isDirector } = useAuthStore();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+
   const [checkerNote, setCheckerNote] = useState('');
   const [directorNote, setDirectorNote] = useState('');
   const [cancelReason, setCancelReason] = useState('');
   const [showCancel, setShowCancel] = useState(false);
   const [error, setError] = useState('');
+
+  // Super Admin amount override states
+  const [overrideCheckerAmount, setOverrideCheckerAmount] = useState<string>('');
+  const [overrideDirectorAmount, setOverrideDirectorAmount] = useState<string>('');
+  const [showCheckerAmountEdit, setShowCheckerAmountEdit] = useState(false);
+  const [showDirectorAmountEdit, setShowDirectorAmountEdit] = useState(false);
 
   const { data: tx, isLoading } = useQuery({
     queryKey: ['payment', id],
@@ -25,13 +33,25 @@ export default function PaymentDetailPage() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['payment', id] });
 
   const checkerMutation = useMutation({
-    mutationFn: (action: 'APPROVED' | 'REJECTED' | 'RETURNED') => paymentsApi.checkerAction(id!, { action, note: checkerNote }),
-    onSuccess: invalidate, onError: (err: unknown) => setError(extractApiError(err)),
+    mutationFn: (action: 'APPROVED' | 'REJECTED' | 'RETURNED') => {
+      const approvedAmount = action === 'APPROVED' && overrideCheckerAmount
+        ? parseFloat(overrideCheckerAmount) : undefined;
+      return paymentsApi.checkerAction(id!, { action, note: checkerNote, approvedAmount });
+    },
+    onSuccess: () => { invalidate(); setOverrideCheckerAmount(''); setShowCheckerAmountEdit(false); },
+    onError: (err: unknown) => setError(extractApiError(err)),
   });
+
   const directorMutation = useMutation({
-    mutationFn: (action: 'APPROVED' | 'REJECTED') => paymentsApi.directorAction(id!, { action, note: directorNote }),
-    onSuccess: invalidate, onError: (err: unknown) => setError(extractApiError(err)),
+    mutationFn: (action: 'APPROVED' | 'REJECTED') => {
+      const approvedAmount = action === 'APPROVED' && overrideDirectorAmount
+        ? parseFloat(overrideDirectorAmount) : undefined;
+      return paymentsApi.directorAction(id!, { action, note: directorNote, approvedAmount });
+    },
+    onSuccess: () => { invalidate(); setOverrideDirectorAmount(''); setShowDirectorAmountEdit(false); },
+    onError: (err: unknown) => setError(extractApiError(err)),
   });
+
   const cancelMutation = useMutation({
     mutationFn: () => paymentsApi.cancel(id!, cancelReason),
     onSuccess: () => { invalidate(); setShowCancel(false); },
@@ -41,11 +61,16 @@ export default function PaymentDetailPage() {
   if (isLoading) return <div className="flex items-center justify-center py-24"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
   if (!tx) return <div className="text-center py-24 text-gray-500">Transaction not found</div>;
 
-  const canCheckerAct = canApprove() && tx.status === 'PENDING_CHECKER' && tx.maker?.id !== user?.id;
+  // Super Admin can approve even their own transactions
+  const canCheckerAct = canApprove() && tx.status === 'PENDING_CHECKER' && (isSuperAdmin || tx.maker?.id !== user?.id);
   const canDirectorAct = isDirector() && tx.status === 'PENDING_DIRECTOR';
-  const canCancel = tx.makerId === user?.id && ['DRAFT','PENDING_CHECKER','PENDING_DIRECTOR'].includes(tx.status);
+  const canCancel = (isSuperAdmin || tx.makerId === user?.id) && ['DRAFT','PENDING_CHECKER','PENDING_DIRECTOR'].includes(tx.status);
   const isCompleted = tx.status === 'COMPLETED';
   const isFailed = tx.status === 'FAILED' || tx.status.includes('REJECTED');
+
+  const originalAmount = Number(tx.amount);
+  const checkerNewAmount = overrideCheckerAmount ? parseFloat(overrideCheckerAmount) : null;
+  const directorNewAmount = overrideDirectorAmount ? parseFloat(overrideDirectorAmount) : null;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -133,7 +158,7 @@ export default function PaymentDetailPage() {
           </dl>
         </div>
 
-        {/* Wallet */}
+        {/* Wallet + Action Panels */}
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="font-semibold text-gray-900 mb-3 flex items-center gap-2"><Wallet className="w-4 h-4 text-blue-600" /> Source Wallet</h2>
@@ -141,14 +166,66 @@ export default function PaymentDetailPage() {
             <p className="text-xs text-gray-400">{tx.wallet?.type}</p>
           </div>
 
-          {/* Actions */}
+          {/* ── CHECKER ACTION ── */}
           {canCheckerAct && (
             <div className="bg-white rounded-xl border-2 border-blue-200 p-6 space-y-3">
               <h2 className="font-semibold text-blue-900 flex items-center gap-2"><CheckCircle className="w-4 h-4" /> Checker Review</h2>
-              <textarea value={checkerNote} onChange={(e) => setCheckerNote(e.target.value)} rows={3} placeholder="Add notes (optional)..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+
+              {/* Super Admin Amount Override */}
+              {isSuperAdmin && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-blue-800 uppercase tracking-wide">⚡ Super Admin — Modify Amount</span>
+                    <button
+                      onClick={() => { setShowCheckerAmountEdit(!showCheckerAmountEdit); setOverrideCheckerAmount(''); }}
+                      className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-medium"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      {showCheckerAmountEdit ? 'Cancel Edit' : 'Edit Amount'}
+                    </button>
+                  </div>
+                  <div className="text-sm text-blue-700">
+                    Original: <strong>{formatCurrency(originalAmount)}</strong>
+                  </div>
+                  {showCheckerAmountEdit && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-blue-700 font-medium">New Approved Amount (KES)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max={originalAmount}
+                        step="0.01"
+                        value={overrideCheckerAmount}
+                        onChange={(e) => setOverrideCheckerAmount(e.target.value)}
+                        placeholder={`Max: ${originalAmount}`}
+                        className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm font-mono font-semibold outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      />
+                      {checkerNewAmount !== null && checkerNewAmount > 0 && checkerNewAmount < originalAmount && (
+                        <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-700">
+                          ⚠️ Amount reduced by <strong>{formatCurrency(originalAmount - checkerNewAmount)}</strong>. 
+                          New amount: <strong className="text-green-700">{formatCurrency(checkerNewAmount)}</strong>. 
+                          The difference will be returned to wallet.
+                        </div>
+                      )}
+                      {checkerNewAmount !== null && checkerNewAmount >= originalAmount && (
+                        <div className="text-xs text-red-600">Amount must be less than original {formatCurrency(originalAmount)}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <textarea value={checkerNote} onChange={(e) => setCheckerNote(e.target.value)} rows={2} placeholder="Add notes (optional)..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               <div className="flex gap-2">
-                <button onClick={() => checkerMutation.mutate('APPROVED')} disabled={checkerMutation.isPending} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50">
-                  {checkerMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Approve
+                <button
+                  onClick={() => checkerMutation.mutate('APPROVED')}
+                  disabled={checkerMutation.isPending || (showCheckerAmountEdit && !!overrideCheckerAmount && (isNaN(checkerNewAmount!) || checkerNewAmount! <= 0 || checkerNewAmount! >= originalAmount))}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50"
+                >
+                  {checkerMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                  {showCheckerAmountEdit && checkerNewAmount && checkerNewAmount > 0 && checkerNewAmount < originalAmount
+                    ? `Approve ${formatCurrency(checkerNewAmount)}`
+                    : 'Approve'}
                 </button>
                 <button onClick={() => checkerMutation.mutate('RETURNED')} disabled={checkerMutation.isPending} className="flex-1 bg-yellow-500 hover:bg-yellow-600 text-white py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1 disabled:opacity-50">
                   <RotateCcw className="w-3.5 h-3.5" /> Return
@@ -160,16 +237,66 @@ export default function PaymentDetailPage() {
             </div>
           )}
 
+          {/* ── DIRECTOR ACTION ── */}
           {canDirectorAct && (
             <div className="bg-white rounded-xl border-2 border-orange-200 p-6 space-y-3">
               <h2 className="font-semibold text-orange-900 flex items-center gap-2"><Shield className="w-4 h-4" /> Director Final Approval</h2>
               <div className="bg-orange-50 p-3 rounded-lg text-xs text-orange-700 border border-orange-200">
                 ⚠️ By approving, you authorize the disbursement of <strong>{formatCurrency(tx.amount)}</strong> to <strong>{tx.recipientName}</strong>. This action is logged and audited.
               </div>
-              <textarea value={directorNote} onChange={(e) => setDirectorNote(e.target.value)} rows={3} placeholder="Director notes (optional)..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-orange-500 resize-none" />
+
+              {/* Super Admin Director Amount Override */}
+              {isSuperAdmin && (
+                <div className="bg-orange-50 border border-orange-300 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-orange-800 uppercase tracking-wide">⚡ Super Admin — Modify Amount</span>
+                    <button
+                      onClick={() => { setShowDirectorAmountEdit(!showDirectorAmountEdit); setOverrideDirectorAmount(''); }}
+                      className="text-xs text-orange-700 hover:text-orange-900 flex items-center gap-1 font-medium"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      {showDirectorAmountEdit ? 'Cancel Edit' : 'Edit Amount'}
+                    </button>
+                  </div>
+                  <div className="text-sm text-orange-700">
+                    Original: <strong>{formatCurrency(originalAmount)}</strong>
+                  </div>
+                  {showDirectorAmountEdit && (
+                    <div className="space-y-2">
+                      <label className="text-xs text-orange-700 font-medium">New Approved Amount (KES)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max={originalAmount}
+                        step="0.01"
+                        value={overrideDirectorAmount}
+                        onChange={(e) => setOverrideDirectorAmount(e.target.value)}
+                        placeholder={`Max: ${originalAmount}`}
+                        className="w-full px-3 py-2 border border-orange-300 rounded-lg text-sm font-mono font-semibold outline-none focus:ring-2 focus:ring-orange-500 bg-white"
+                      />
+                      {directorNewAmount !== null && directorNewAmount > 0 && directorNewAmount < originalAmount && (
+                        <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 text-amber-700">
+                          ⚠️ Amount reduced by <strong>{formatCurrency(originalAmount - directorNewAmount)}</strong>. 
+                          Final approved: <strong className="text-green-700">{formatCurrency(directorNewAmount)}</strong>. 
+                          Difference returned to wallet.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <textarea value={directorNote} onChange={(e) => setDirectorNote(e.target.value)} rows={2} placeholder="Director notes (optional)..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-orange-500 resize-none" />
               <div className="flex gap-2">
-                <button onClick={() => directorMutation.mutate('APPROVED')} disabled={directorMutation.isPending} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1 disabled:opacity-50">
-                  {directorMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Approve & Authorize
+                <button
+                  onClick={() => directorMutation.mutate('APPROVED')}
+                  disabled={directorMutation.isPending}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1 disabled:opacity-50"
+                >
+                  {directorMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                  {showDirectorAmountEdit && directorNewAmount && directorNewAmount > 0 && directorNewAmount < originalAmount
+                    ? `Approve ${formatCurrency(directorNewAmount)}`
+                    : 'Approve & Authorize'}
                 </button>
                 <button onClick={() => directorMutation.mutate('REJECTED')} disabled={directorMutation.isPending} className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2.5 rounded-lg text-sm font-semibold flex items-center justify-center gap-1 disabled:opacity-50">
                   <XCircle className="w-3.5 h-3.5" /> Reject
