@@ -488,7 +488,6 @@ function CheckerModal({
           </View>
         </Animated.View>
       </View>
-    </KeyboardAvoidingView>
     </Modal>
   );
 }
