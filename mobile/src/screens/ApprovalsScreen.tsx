@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, TextInput, RefreshControl,
-  Modal, Animated, Dimensions, Platform, SafeAreaView, KeyboardAvoidingView,
+  Modal, Animated, Dimensions, Platform, KeyboardAvoidingView, StatusBar,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
@@ -651,8 +651,7 @@ export default function ApprovalsScreen() {
   const directorCount = directorData?.length ?? 0;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0f172a' }}>
-      <View style={s.root}>
+    <View style={s.root}>
       {/* Header */}
       <LinearGradient colors={['#0f172a', '#1e293b']} style={s.header}>
         <View>
@@ -806,7 +805,6 @@ export default function ApprovalsScreen() {
         onSubmit={(id, action, reason) => checkerMutation.mutate({ id, action, reason })}
       />
     </View>
-    </SafeAreaView>
   );
 }
 
@@ -816,7 +814,8 @@ export default function ApprovalsScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f8fafc' },
   header: {
-    paddingTop: 16, paddingBottom: 16, paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight ?? 24) + 8 : 16,
+    paddingBottom: 16, paddingHorizontal: 20,
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
     backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
   },

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  TextInput, Alert, ActivityIndicator, Platform, Modal,
+  TextInput, Alert, ActivityIndicator, Platform, Modal, StatusBar,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -434,7 +434,7 @@ export default function NewPaymentScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#0a0f1e' },
-  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  header: { paddingTop: Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 8, paddingBottom: 16, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 12 },
   backBtn: { width: 36, height: 36, borderRadius: 12, backgroundColor: '#ffffff15', alignItems: 'center', justifyContent: 'center' },
   backText: { color: '#fff', fontSize: 20 },
   headerTitle: { color: '#f1f5f9', fontSize: 18, fontWeight: '700' },

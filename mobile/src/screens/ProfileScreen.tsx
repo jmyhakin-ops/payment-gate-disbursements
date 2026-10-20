@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, Platform, Share,
+  Alert, Platform, Share, StatusBar,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
@@ -147,7 +147,7 @@ export default function ProfileScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { paddingTop: Platform.OS === 'ios' ? 56 : 20, paddingBottom: 24, paddingHorizontal: 20, alignItems: 'center', backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  header: { paddingTop: Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 8, paddingBottom: 24, paddingHorizontal: 20, alignItems: 'center', backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   avatarWrap: { position: 'relative', marginBottom: 14 },
   avatar: { width: 84, height: 84, borderRadius: 28, alignItems: 'center', justifyContent: 'center', shadowColor: '#4f46e5', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 14, elevation: 10 },
   avatarText: { color: '#fff', fontSize: 28, fontWeight: '900' },

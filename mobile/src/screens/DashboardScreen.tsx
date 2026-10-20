@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, Animated, Platform, Dimensions, SafeAreaView,
+  RefreshControl, Animated, Platform, Dimensions, StatusBar,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -341,7 +341,7 @@ const s = StyleSheet.create({
     backgroundColor: '#f8fafc', // Ultra-bright luxury platinum slate
   },
   headerGrad: {
-    paddingTop: Platform.OS === 'ios' ? 56 : 24,
+    paddingTop: Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 8,
     paddingBottom: 8,
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  RefreshControl, Platform,
+  RefreshControl, Platform, StatusBar,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -191,7 +191,7 @@ export default function WalletsScreen() {
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#f8fafc' },
-  header: { paddingTop: Platform.OS === 'ios' ? 56 : 16, paddingBottom: 16, paddingHorizontal: 20, gap: 4, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  header: { paddingTop: Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 8, paddingBottom: 16, paddingHorizontal: 20, gap: 4, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
   headerTitle: { color: '#0f172a', fontSize: 24, fontWeight: '900', letterSpacing: -0.5 },
   headerSub: { color: '#64748b', fontSize: 13, fontWeight: '500' },
   totalBanner: { flexDirection: 'row', justifyContent: 'space-between', backgroundColor: '#f1f5f9', borderRadius: 16, padding: 14, marginTop: 12, borderWidth: 1, borderColor: '#e2e8f0' },
