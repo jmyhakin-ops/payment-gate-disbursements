@@ -147,17 +147,28 @@ export default function ApiCredentialsPage() {
   const { data: credentialsData, isLoading } = useQuery({
     queryKey: ['api-credentials'],
     queryFn: () => api.get('/settings/api-credentials').then(r => r.data.data),
-    onSuccess: (data: any[]) => {
-      const f: Record<string, Record<string, string>> = {};
-      data.forEach((cred: any) => {
-        const railKey = cred.rail || REVERSE_TYPE_MAP[cred.type] || cred.type;
-        if (railKey && cred.credentials) {
-          f[railKey] = cred.credentials;
-        }
-      });
-      setForms(f);
-    },
   });
+
+  // Populate forms whenever data loads (useEffect instead of deprecated onSuccess)
+  const formsPopulated = React.useRef(false);
+  React.useEffect(() => {
+    if (!credentialsData || formsPopulated.current) return;
+    const f: Record<string, Record<string, string>> = {};
+    (credentialsData as any[]).forEach((cred: any) => {
+      const railKey = REVERSE_TYPE_MAP[cred.type] || cred.type;
+      if (railKey && cred.credentials && typeof cred.credentials === 'object') {
+        // Only pre-fill non-password fields (masked values aren't useful)
+        const filtered: Record<string, string> = {};
+        Object.entries(cred.credentials as Record<string, string>).forEach(([k, v]) => {
+          // Skip masked values like "abcd****xyz" — leave password fields blank for re-entry
+          if (!v.includes('****')) filtered[k] = v;
+        });
+        f[railKey] = filtered;
+      }
+    });
+    setForms(f);
+    formsPopulated.current = true;
+  }, [credentialsData]);
 
   // Normalize credentials to include rail key for sidebar status
   const credentials: any[] = (credentialsData ?? []).map((c: any) => ({
@@ -193,24 +204,26 @@ export default function ApiCredentialsPage() {
     },
     onSuccess: (_, { rail }) => {
       toast({ type: 'success', title: `${rail} credentials saved`, description: 'Credentials encrypted with AES-256' });
+      formsPopulated.current = false; // allow re-population on next fetch
       qc.invalidateQueries(['api-credentials']);
     },
     onError: (e: any) => toast({ type: 'error', title: 'Failed to save credentials', description: e?.response?.data?.message || 'Please check all required fields' }),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (rail: string) => api.delete(`/settings/api-credentials/${rail}`).then(r => r.data),
+    mutationFn: (credId: string) => api.delete(`/settings/api-credentials/${credId}`).then(r => r.data),
     onSuccess: () => {
       toast({ type: 'success', title: 'Credentials deleted' });
       qc.invalidateQueries(['api-credentials']);
+      formsPopulated.current = false;
       setConfirmDelete(null);
     },
   });
 
-  const testConnection = async (rail: string) => {
+  const testConnection = async (credId: string, rail: string) => {
     setTestingRail(rail);
     try {
-      const res = await api.post(`/settings/api-credentials/${rail}/test`);
+      const res = await api.post(`/settings/api-credentials/${credId}/test`);
       setTestResult(prev => ({ ...prev, [rail]: { ok: true, message: res.data.message ?? 'Connection successful!' } }));
     } catch (e: any) {
       setTestResult(prev => ({ ...prev, [rail]: { ok: false, message: e?.response?.data?.message ?? 'Connection failed' } }));
@@ -300,14 +313,14 @@ export default function ApiCredentialsPage() {
                     variant="outline"
                     size="sm"
                     loading={testingRail === activeRail}
-                    onClick={() => testConnection(activeRail)}
+                    onClick={() => testConnection(activeCred.id, activeRail)}
                   >
                     <TestTube className="w-4 h-4" /> Test Connection
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setConfirmDelete(activeRail)}
+                    onClick={() => setConfirmDelete(activeCred.id)}
                   >
                     <Trash2 className="w-4 h-4 text-red-500" />
                   </Button>

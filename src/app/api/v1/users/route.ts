@@ -24,17 +24,25 @@ function decryptCreds(enc: string): Record<string, string> {
 // ─── Send invitation email via saved SMTP settings ────────────────────────────
 async function sendInvitationEmail(orgId: string, toEmail: string, token: string, role: string) {
   try {
-    const smtpCred = await prisma.apiCredential.findFirst({
+    // 1) Look for active SMTP cred in this org
+    let smtpCred = await prisma.apiCredential.findFirst({
       where: { organizationId: orgId, type: 'SMTP_EMAIL', isActive: true },
     });
+    // 2) Any SMTP in this org (active or not)
     if (!smtpCred) {
-      // Try any SMTP cred even if not marked active
-      const anySmtp = await prisma.apiCredential.findFirst({
+      smtpCred = await prisma.apiCredential.findFirst({
         where: { organizationId: orgId, type: 'SMTP_EMAIL' },
       });
-      if (!anySmtp) return { sent: false, reason: 'No SMTP credentials configured. Please configure Email (SMTP) in Settings.' };
-      const creds = decryptCreds(anySmtp.credentials as string);
-      return await doSendEmail(creds, toEmail, token, role);
+    }
+    // 3) Any SMTP anywhere in the system (Super Admin may have saved under a different org)
+    if (!smtpCred) {
+      smtpCred = await prisma.apiCredential.findFirst({
+        where: { type: 'SMTP_EMAIL' },
+        orderBy: { updatedAt: 'desc' }, // use most recently updated
+      });
+    }
+    if (!smtpCred) {
+      return { sent: false, reason: 'No SMTP credentials configured. Go to Settings → API Credentials → Email (SMTP) and save your settings.' };
     }
     const creds = decryptCreds(smtpCred.credentials as string);
     return await doSendEmail(creds, toEmail, token, role);
