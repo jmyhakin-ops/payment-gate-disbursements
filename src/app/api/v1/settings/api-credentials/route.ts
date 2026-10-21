@@ -96,9 +96,13 @@ export async function POST(request: NextRequest) {
       organizationId: z.string().uuid().optional(),
     }).parse(body);
 
-    // Super Admin can explicitly target an org; otherwise use their own
-    const targetOrgId = data.organizationId ?? orgId;
-    if (!targetOrgId) throw new AppError('organizationId is required for Super Admin', 400, 'MISSING_ORG');
+    // Super Admin can explicitly target an org; otherwise use their own or first org
+    let targetOrgId = data.organizationId ?? orgId;
+    if (!targetOrgId && isSuperAdmin) {
+      const firstOrg = await prisma.organization.findFirst({ orderBy: { createdAt: 'asc' } });
+      if (firstOrg) targetOrgId = firstOrg.id;
+    }
+    if (!targetOrgId) throw new AppError('No organization found. Please create an organization first.', 400, 'MISSING_ORG');
 
     const encryptedCreds = encrypt(JSON.stringify(data.credentials));
 

@@ -24,17 +24,34 @@ function decryptCreds(enc: string): Record<string, string> {
 // ─── Send invitation email via saved SMTP settings ────────────────────────────
 async function sendInvitationEmail(orgId: string, toEmail: string, token: string, role: string) {
   try {
-    // 1) Look for active SMTP cred in this org
+    // 1) First check if Vercel environment variables are configured
+    const envHost = process.env.SMTP_HOST;
+    const envUser = process.env.SMTP_USER || process.env.SMTP_USERNAME;
+    const envPass = process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
+    if (envHost && envUser && envPass) {
+      const envCreds = {
+        host: envHost,
+        port: process.env.SMTP_PORT || '587',
+        username: envUser,
+        password: envPass,
+        fromEmail: process.env.SMTP_FROM || process.env.EMAIL_FROM || envUser,
+        fromName: process.env.SMTP_FROM_NAME || 'KenyaPay',
+        secure: process.env.SMTP_SECURE || 'false',
+      };
+      return await doSendEmail(envCreds, toEmail, token, role);
+    }
+
+    // 2) Look for active SMTP cred in this org
     let smtpCred = await prisma.apiCredential.findFirst({
       where: { organizationId: orgId, type: 'SMTP_EMAIL', isActive: true },
     });
-    // 2) Any SMTP in this org (active or not)
+    // 3) Any SMTP in this org (active or not)
     if (!smtpCred) {
       smtpCred = await prisma.apiCredential.findFirst({
         where: { organizationId: orgId, type: 'SMTP_EMAIL' },
       });
     }
-    // 3) Any SMTP anywhere in the system (Super Admin may have saved under a different org)
+    // 4) Any SMTP anywhere in the system (Super Admin may have saved under a different org)
     if (!smtpCred) {
       smtpCred = await prisma.apiCredential.findFirst({
         where: { type: 'SMTP_EMAIL' },
@@ -42,7 +59,7 @@ async function sendInvitationEmail(orgId: string, toEmail: string, token: string
       });
     }
     if (!smtpCred) {
-      return { sent: false, reason: 'No SMTP credentials configured. Go to Settings → API Credentials → Email (SMTP) and save your settings.' };
+      return { sent: false, reason: 'No SMTP credentials configured. Enter host/username/password in Settings → API Credentials → Email (SMTP), or set SMTP_HOST/SMTP_USER/SMTP_PASS in Vercel environment variables.' };
     }
     const creds = decryptCreds(smtpCred.credentials as string);
     return await doSendEmail(creds, toEmail, token, role);
@@ -59,7 +76,13 @@ async function doSendEmail(creds: Record<string, string>, toEmail: string, token
   const fromName = creds.fromName || 'KenyaPay';
   const fromEmail = creds.fromEmail || user;
 
-  if (!host || !user || !pass) return { sent: false, reason: 'Incomplete SMTP settings (host/username/password required).' };
+  const missing = [];
+  if (!host) missing.push('Host');
+  if (!user) missing.push('Username');
+  if (!pass) missing.push('Password');
+  if (missing.length > 0) {
+    return { sent: false, reason: `Incomplete SMTP settings (missing: ${missing.join(', ')}). Please re-enter in Settings → API Credentials → Email (SMTP) and save.` };
+  }
 
   const isSecure = creds.secure === 'true' || port === 465;
 

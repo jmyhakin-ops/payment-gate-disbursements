@@ -413,7 +413,23 @@ export default function ApiCredentialsPage() {
               <Shield className="w-3.5 h-3.5" />
               Stored encrypted. Never visible in plaintext after saving.
             </p>
-            <Button onClick={() => saveMutation.mutate({ rail: activeRail, creds: form })} loading={saveMutation.isLoading}>
+            <Button
+              onClick={() => {
+                const missing = activeRailConfig.fields.filter(
+                  f => f.required && (!form[f.key] || form[f.key].trim() === '')
+                );
+                if (missing.length > 0) {
+                  toast({
+                    type: 'error',
+                    title: 'Missing Required Fields',
+                    description: `Please enter: ${missing.map(m => m.label).join(', ')}`,
+                  });
+                  return;
+                }
+                saveMutation.mutate({ rail: activeRail, creds: form });
+              }}
+              loading={saveMutation.isLoading}
+            >
               <Save className="w-4 h-4" /> {activeCred ? 'Update' : 'Save'} Credentials
             </Button>
           </div>
