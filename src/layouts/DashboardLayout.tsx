@@ -126,8 +126,8 @@ export function DashboardLayout() {
 
   const { data: notifCount } = useQuery({
     queryKey: ['notif-count'],
-    queryFn: () => api.get('/users/notifications?unreadOnly=true&limit=1').then(r => r.data.meta?.unreadCount ?? 0).catch(() => 0),
-    refetchInterval: 15000, // check every 15 seconds for faster notifications
+    queryFn: () => api.get('/users?_path=me/notifications&unreadOnly=true&limit=1').then(r => r.data.meta?.unreadCount ?? 0).catch(() => 0),
+    refetchInterval: 30000, // every 30 seconds
   });
 
   // Play notification sound when new notifications arrive
