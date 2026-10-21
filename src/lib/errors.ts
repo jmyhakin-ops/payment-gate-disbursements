@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export class AppError extends Error {
   public statusCode: number;
   public code: string;
@@ -17,9 +19,36 @@ export function handleApiError(err: unknown): Response {
       { status: err.statusCode }
     );
   }
-  if (err instanceof Error && err.message.includes('Unique constraint')) {
-    return Response.json({ success: false, message: 'Record already exists', code: 'DUPLICATE' }, { status: 409 });
+
+  if (err instanceof z.ZodError) {
+    const issues = err.errors.map((e) => {
+      const field = e.path.join('.');
+      return field ? `${field}: ${e.message}` : e.message;
+    }).filter(Boolean);
+    const message = issues.length > 0 ? issues.join(', ') : 'Validation error';
+    return Response.json(
+      { success: false, message, code: 'VALIDATION_ERROR', errors: err.errors },
+      { status: 400 }
+    );
   }
+
+  if (err instanceof Error) {
+    if (err.message.includes('Unique constraint') || (err as any).code === 'P2002') {
+      return Response.json(
+        { success: false, message: 'A record with this information already exists', code: 'DUPLICATE' },
+        { status: 409 }
+      );
+    }
+
+    if ((err as any).code === 'P2025') {
+      return Response.json(
+        { success: false, message: 'Record not found', code: 'NOT_FOUND' },
+        { status: 404 }
+      );
+    }
+  }
+
   console.error('[API Error]', err);
-  return Response.json({ success: false, message: 'An internal error occurred', code: 'INTERNAL_ERROR' }, { status: 500 });
+  const message = err instanceof Error ? err.message : 'An internal error occurred';
+  return Response.json({ success: false, message, code: 'INTERNAL_ERROR' }, { status: 500 });
 }

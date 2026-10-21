@@ -92,6 +92,7 @@ export const usersApi = {
   list: (params?: object) => api.get('/users', { params }),
   get: (id: string) => api.get(`/users/${id}`),
   invite: (data: object) => api.post('/users/invite', data),
+  getInvitation: (token: string) => api.get('/users/accept-invitation', { params: { token } }),
   acceptInvitation: (data: object) => api.post('/users/accept-invitation', data),
   update: (id: string, data: object) => api.put(`/users/${id}`, data),
   suspend: (id: string) => api.put(`/users/${id}/suspend`),

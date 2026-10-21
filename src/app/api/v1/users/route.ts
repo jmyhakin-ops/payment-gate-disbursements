@@ -180,14 +180,40 @@ export async function POST(request: NextRequest) {
     // Public action: accept-invitation (no auth required)
     if (action === 'accept-invitation') {
       const body = await request.json();
-      const data = z.object({ token: z.string(), firstName: z.string().min(2), lastName: z.string().min(2), password: z.string().min(8), phone: z.string().optional() }).parse(body);
-      const invitation = await prisma.userInvitation.findFirst({ where: { token: data.token, acceptedAt: null, expiresAt: { gt: new Date() } } });
-      if (!invitation) throw new AppError('Invalid or expired invitation', 400, 'INVALID_INVITATION');
-      const existing = await prisma.user.findUnique({ where: { email: invitation.email } });
+      const data = z.object({
+        token: z.string().min(1, 'Token is required'),
+        firstName: z.string().min(1, 'First name is required'),
+        lastName: z.string().min(1, 'Last name is required'),
+        password: z.string().min(8, 'Password must be at least 8 characters'),
+        phone: z.string().optional().nullable().or(z.literal('')),
+      }).passthrough().parse(body);
+
+      const token = data.token.trim();
+      const invitation = await prisma.userInvitation.findFirst({ where: { token } });
+      if (!invitation) throw new AppError('Invalid invitation link', 404, 'INVALID_INVITATION');
+      if (invitation.acceptedAt) throw new AppError('This invitation has already been accepted', 400, 'ALREADY_ACCEPTED');
+      if (new Date() > invitation.expiresAt) throw new AppError('This invitation has expired', 400, 'INVITATION_EXPIRED');
+
+      const cleanEmail = invitation.email.toLowerCase().trim();
+      const existing = await prisma.user.findUnique({ where: { email: cleanEmail } });
       if (existing) throw new AppError('An account with this email already exists. Please log in.', 409, 'USER_EXISTS');
+
       const passwordHash = await bcrypt.hash(data.password, 12);
+      const cleanPhone = (typeof data.phone === 'string' && data.phone.trim().length > 0) ? data.phone.trim() : null;
+
       const user = await prisma.user.create({
-        data: { email: invitation.email, passwordHash, firstName: data.firstName, lastName: data.lastName, phone: data.phone, role: invitation.role, organizationId: invitation.organizationId, status: UserStatus.ACTIVE, emailVerified: true },
+        data: {
+          email: cleanEmail,
+          passwordHash,
+          firstName: data.firstName.trim(),
+          lastName: data.lastName.trim(),
+          phone: cleanPhone,
+          role: invitation.role,
+          organizationId: invitation.organizationId,
+          status: UserStatus.ACTIVE,
+          emailVerified: true,
+          refreshTokens: [],
+        },
         select: { id: true },
       });
       await prisma.userInvitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date(), invitedUserId: user.id } });
