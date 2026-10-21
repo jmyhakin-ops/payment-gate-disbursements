@@ -174,10 +174,28 @@ export async function GET(request: NextRequest) {
 // ─── POST /api/v1/users ───────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
   try {
-    const decoded = getAuthFromRequest(request);
-    const body = await request.json();
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
+
+    // Public action: accept-invitation (no auth required)
+    if (action === 'accept-invitation') {
+      const body = await request.json();
+      const data = z.object({ token: z.string(), firstName: z.string().min(2), lastName: z.string().min(2), password: z.string().min(8), phone: z.string().optional() }).parse(body);
+      const invitation = await prisma.userInvitation.findFirst({ where: { token: data.token, acceptedAt: null, expiresAt: { gt: new Date() } } });
+      if (!invitation) throw new AppError('Invalid or expired invitation', 400, 'INVALID_INVITATION');
+      const existing = await prisma.user.findUnique({ where: { email: invitation.email } });
+      if (existing) throw new AppError('An account with this email already exists. Please log in.', 409, 'USER_EXISTS');
+      const passwordHash = await bcrypt.hash(data.password, 12);
+      const user = await prisma.user.create({
+        data: { email: invitation.email, passwordHash, firstName: data.firstName, lastName: data.lastName, phone: data.phone, role: invitation.role, organizationId: invitation.organizationId, status: UserStatus.ACTIVE, emailVerified: true },
+        select: { id: true },
+      });
+      await prisma.userInvitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date(), invitedUserId: user.id } });
+      return Response.json({ success: true, message: 'Invitation accepted. You can now login.', data: { userId: user.id } });
+    }
+
+    const decoded = getAuthFromRequest(request);
+    const body = await request.json();
 
     if (action === 'invite') {
       requireRole(decoded.role, UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN);
@@ -244,19 +262,6 @@ export async function POST(request: NextRequest) {
           : `Invitation saved — email not sent: ${emailResult.reason}. Share the link below manually.`,
         data: { id: invitation.id, token: invitation.token, acceptUrl, emailSent: emailResult.sent, wasResent },
       }, { status: 201 });
-    }
-
-    if (action === 'accept-invitation') {
-      const data = z.object({ token: z.string(), firstName: z.string().min(2), lastName: z.string().min(2), password: z.string().min(8), phone: z.string().optional() }).parse(body);
-      const invitation = await prisma.userInvitation.findFirst({ where: { token: data.token, acceptedAt: null, expiresAt: { gt: new Date() } } });
-      if (!invitation) throw new AppError('Invalid or expired invitation', 400, 'INVALID_INVITATION');
-      const passwordHash = await bcrypt.hash(data.password, 12);
-      const user = await prisma.user.create({
-        data: { email: invitation.email, passwordHash, firstName: data.firstName, lastName: data.lastName, phone: data.phone, role: invitation.role, organizationId: invitation.organizationId, status: UserStatus.ACTIVE, emailVerified: true },
-        select: { id: true },
-      });
-      await prisma.userInvitation.update({ where: { id: invitation.id }, data: { acceptedAt: new Date(), invitedUserId: user.id } });
-      return Response.json({ success: true, message: 'Invitation accepted. You can now login.', data: { userId: user.id } });
     }
 
     if (action === 'notifications-read-all') {
