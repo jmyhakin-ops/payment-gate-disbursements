@@ -27,7 +27,7 @@ export default function WalletsPage() {
 
   const { data: summary } = useQuery({
     queryKey: ['wallet-summary'],
-    queryFn: () => api.get('/wallets/summary').then(r => r.data.data),
+    queryFn: () => api.get('/wallets?action=summary').then(r => r.data.data),
   });
 
   const wallets: any[] = data?.data ?? [];

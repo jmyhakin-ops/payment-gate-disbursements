@@ -61,34 +61,43 @@ async function doSendEmail(creds: Record<string, string>, toEmail: string, token
 
   if (!host || !user || !pass) return { sent: false, reason: 'Incomplete SMTP settings (host/username/password required).' };
 
+  const isSecure = creds.secure === 'true' || port === 465;
+
   const transporter = nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,
+    secure: isSecure,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
   });
 
   const acceptUrl = `${process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://payment-gate-disbursements.vercel.app'}/accept-invitation?token=${token}`;
 
-  await transporter.sendMail({
-    from: `"${fromName}" <${fromEmail}>`,
-    to: toEmail,
-    subject: `You're invited to join KenyaPay as ${role}`,
-    html: `
-      <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;border:1px solid #e5e7eb;border-radius:12px">
-        <h2 style="color:#4f46e5;margin-bottom:8px">You're invited to KenyaPay 🎉</h2>
-        <p style="color:#374151">You have been invited to join the platform as <strong>${role}</strong>.</p>
-        <p style="color:#374151">Click the button below to accept your invitation and set your password. This link expires in <strong>48 hours</strong>.</p>
-        <a href="${acceptUrl}" style="display:inline-block;margin:20px 0;padding:14px 28px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Accept Invitation</a>
-        <p style="color:#6b7280;font-size:13px">Or paste this link in your browser:<br/><span style="color:#4f46e5">${acceptUrl}</span></p>
-        <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>
-        <p style="color:#9ca3af;font-size:12px">If you did not expect this invitation, you can safely ignore this email.</p>
-      </div>
-    `,
-  });
-
-  return { sent: true };
+  try {
+    await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to: toEmail,
+      subject: `You're invited to join KenyaPay as ${role}`,
+      html: `
+        <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px;border:1px solid #e5e7eb;border-radius:12px">
+          <h2 style="color:#4f46e5;margin-bottom:8px">You're invited to KenyaPay 🎉</h2>
+          <p style="color:#374151">You have been invited to join the platform as <strong>${role}</strong>.</p>
+          <p style="color:#374151">Click the button below to accept your invitation and set your password. This link expires in <strong>48 hours</strong>.</p>
+          <a href="${acceptUrl}" style="display:inline-block;margin:20px 0;padding:14px 28px;background:#4f46e5;color:#fff;text-decoration:none;border-radius:8px;font-weight:bold">Accept Invitation</a>
+          <p style="color:#6b7280;font-size:13px">Or paste this link in your browser:<br/><span style="color:#4f46e5">${acceptUrl}</span></p>
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0"/>
+          <p style="color:#9ca3af;font-size:12px">If you did not expect this invitation, you can safely ignore this email.</p>
+        </div>
+      `,
+    });
+    return { sent: true };
+  } catch (err: any) {
+    console.error('[SMTP error]:', err);
+    return { sent: false, reason: err?.message || 'SMTP delivery failed' };
+  }
 }
 
 function requireRole(role: UserRole, ...allowed: UserRole[]) {

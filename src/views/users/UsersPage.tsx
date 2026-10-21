@@ -103,19 +103,28 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', role: 'MAKER', department: '', jobTitle: '' });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [acceptUrl, setAcceptUrl] = useState('');
+  const [emailStatus, setEmailStatus] = useState<{ sent: boolean; message: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () => api.post('/users?action=invite', { email: form.email, role: form.role, department: form.department, jobTitle: form.jobTitle }),
     onSuccess: (res: any) => {
-      const d = res?.data;
-      if (d?.emailSent === false && d?.acceptUrl) {
-        setAcceptUrl(d.acceptUrl);
-        toast({ type: 'warning', title: 'Invitation Saved — Email Not Sent', description: d?.message ?? 'Configure SMTP in Settings to send emails.' });
+      const responseData = res?.data;
+      const payload = responseData?.data || responseData;
+      const url = payload?.acceptUrl;
+      const emailSent = payload?.emailSent === true;
+      const msg = responseData?.message || (emailSent ? 'Invitation email sent!' : 'Email not sent.');
+
+      if (url) {
+        setAcceptUrl(url);
+      }
+      setEmailStatus({ sent: emailSent, message: msg });
+      onSuccess();
+
+      if (emailSent) {
+        toast({ type: 'success', title: 'Invitation Sent!', description: `Email delivered via SMTP to ${form.email}` });
       } else {
-        toast({ type: 'success', title: 'Invitation Sent!', description: `Invite emailed to ${form.email}` });
-        onSuccess();
-        onClose();
-        setForm({ email: '', firstName: '', lastName: '', role: 'MAKER', department: '', jobTitle: '' });
+        toast({ type: 'warning', title: 'Invitation Created — Email Not Sent', description: msg });
       }
     },
     onError: (e: any) => toast({ type: 'error', title: 'Failed to Invite', description: e?.response?.data?.message ?? 'Please try again.' }),
@@ -127,6 +136,21 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
     else if (!form.email.includes('@')) errs.email = 'Enter a valid email';
     setErrors(errs);
     return Object.keys(errs).length === 0;
+  };
+
+  const handleCopy = () => {
+    if (!acceptUrl) return;
+    navigator.clipboard.writeText(acceptUrl);
+    setCopied(true);
+    toast({ type: 'success', title: 'Copied!', description: 'Invitation link copied to clipboard.' });
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  const handleReset = () => {
+    setAcceptUrl('');
+    setEmailStatus(null);
+    setForm({ email: '', firstName: '', lastName: '', role: 'MAKER', department: '', jobTitle: '' });
+    onClose();
   };
 
   if (!open) return null;
@@ -143,16 +167,64 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
             </div>
             <div>
               <h2 className="text-lg font-bold text-gray-900">Invite New User</h2>
-              <p className="text-sm text-gray-500">Send an email invitation to join your organization</p>
+              <p className="text-sm text-gray-500">Send an email invitation or share the onboarding link</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400">
+          <button onClick={handleReset} className="p-2 rounded-xl hover:bg-gray-100 text-gray-400">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Scrollable body */}
         <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {/* Result banner if already submitted */}
+          {acceptUrl && emailStatus && (
+            <div className={cn(
+              'p-4 rounded-xl border space-y-3',
+              emailStatus.sent
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-amber-50 border-amber-200 text-amber-900'
+            )}>
+              <div className="flex items-start gap-2.5">
+                {emailStatus.sent ? (
+                  <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                )}
+                <div>
+                  <p className="font-semibold text-sm">
+                    {emailStatus.sent ? 'Invitation Email Dispatched!' : 'Invitation Created (Email Not Sent)'}
+                  </p>
+                  <p className="text-xs mt-0.5 opacity-90">{emailStatus.message}</p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1 opacity-80 uppercase tracking-wide">
+                  Direct Onboarding Link (User sets their own password)
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={acceptUrl}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                    className="flex-1 px-3 py-2 rounded-lg border bg-white text-xs font-mono select-all focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shadow-sm"
+                  >
+                    {copied ? '✓ Copied' : 'Copy Link'}
+                  </button>
+                </div>
+                <p className="text-[11px] mt-1 opacity-75">
+                  Share this link via WhatsApp, SMS, or Slack if email is not delivered.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Email */}
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1.5">Email Address *</label>
@@ -220,26 +292,12 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
               <span><strong>{selectedRole.label}:</strong> {selectedRole.description}</span>
             </div>
           )}
-
-          {/* Manual invite link (shown when email not sent) */}
-          {acceptUrl && (
-            <div className="p-3 rounded-xl border border-amber-200 bg-amber-50 text-sm">
-              <p className="font-semibold text-amber-800 mb-1">📧 Email not sent — share this link manually:</p>
-              <input
-                readOnly
-                value={acceptUrl}
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-                className="w-full px-3 py-2 rounded-lg border border-amber-300 bg-white text-xs text-amber-900 font-mono cursor-pointer"
-              />
-              <p className="text-amber-700 text-xs mt-1">Tip: Configure Email (SMTP) in Settings → API Credentials to send emails automatically.</p>
-            </div>
-          )}
         </div>
 
         {/* Footer — always visible */}
         <div className="flex gap-3 p-6 border-t border-gray-100 flex-shrink-0">
-          <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">
-            Cancel
+          <button onClick={handleReset} className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+            {acceptUrl ? 'Close' : 'Cancel'}
           </button>
           <button
             onClick={() => validate() && mutation.mutate()}
@@ -247,7 +305,7 @@ function InviteModal({ open, onClose, onSuccess }: { open: boolean; onClose: () 
             className="flex-1 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
           >
             {mutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-            Send Invitation
+            {acceptUrl ? 'Resend Invitation' : 'Send Invitation'}
           </button>
         </div>
       </div>

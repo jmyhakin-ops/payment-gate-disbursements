@@ -13,13 +13,17 @@ function requireOrg(orgId: string | null, role: UserRole): string {
 export async function GET(request: NextRequest) {
   try {
     const decoded = getAuthFromRequest(request);
-    const orgId = requireOrg(decoded.organizationId, decoded.role);
+    const isSuperAdmin = decoded.role === UserRole.SUPER_ADMIN;
+    const orgId = decoded.organizationId;
+    if (!orgId && !isSuperAdmin) throw new AppError('No organization', 403, 'NO_ORG');
+    const whereOrg = isSuperAdmin && !orgId ? {} : { organizationId: orgId! };
+
     const { searchParams } = new URL(request.url);
     const action = searchParams.get('action');
     const walletId = searchParams.get('walletId');
 
     if (action === 'summary') {
-      const wallets = await prisma.wallet.findMany({ where: { organizationId: orgId } });
+      const wallets = await prisma.wallet.findMany({ where: whereOrg });
       const totalBalance = wallets.reduce((sum, w) => sum + Number(w.balance), 0);
       const totalReserved = wallets.reduce((sum, w) => sum + Number(w.reservedBalance), 0);
       return Response.json({ success: true, data: { wallets, totalBalance, totalReserved, availableBalance: totalBalance - totalReserved } });
@@ -31,7 +35,7 @@ export async function GET(request: NextRequest) {
       const type = searchParams.get('type') as TransactionType | null;
       const startDate = searchParams.get('startDate');
       const endDate = searchParams.get('endDate');
-      const wallet = await prisma.wallet.findFirst({ where: { id: walletId, organizationId: orgId } });
+      const wallet = await prisma.wallet.findFirst({ where: { id: walletId, ...whereOrg } });
       if (!wallet) throw new AppError('Wallet not found', 404, 'NOT_FOUND');
       const where: any = { walletId, ...(type ? { type } : {}), ...(startDate || endDate ? { createdAt: { ...(startDate ? { gte: new Date(startDate) } : {}), ...(endDate ? { lte: new Date(endDate) } : {}) } } : {}) };
       const [data, total] = await Promise.all([
@@ -42,12 +46,12 @@ export async function GET(request: NextRequest) {
     }
 
     if (walletId) {
-      const wallet = await prisma.wallet.findFirst({ where: { id: walletId, organizationId: orgId } });
+      const wallet = await prisma.wallet.findFirst({ where: { id: walletId, ...whereOrg } });
       if (!wallet) throw new AppError('Wallet not found', 404, 'NOT_FOUND');
       return Response.json({ success: true, data: wallet });
     }
 
-    const wallets = await prisma.wallet.findMany({ where: { organizationId: orgId }, orderBy: { createdAt: 'desc' } });
+    const wallets = await prisma.wallet.findMany({ where: whereOrg, orderBy: { createdAt: 'desc' } });
     return Response.json({ success: true, data: wallets });
   } catch (err) { return handleApiError(err); }
 }

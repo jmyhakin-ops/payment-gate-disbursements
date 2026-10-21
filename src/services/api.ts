@@ -135,12 +135,12 @@ export const paymentsApi = {
   cancel: (id: string, reason: string) => api.post(`/payments/${id}/cancel`, { reason }),
   pendingApprovals: () => api.get('/payments/pending-approvals'),
   directorApprovals: () => api.get('/payments/director-approvals'),
-  dashboard: () => api.get('/payments/dashboard'),
+  dashboard: () => api.get('/payments?action=dashboard'),
 };
 
 export const walletsApi = {
   list: () => api.get('/wallets'),
-  summary: () => api.get('/wallets/summary'),
+  summary: () => api.get('/wallets?action=summary'),
   create: (data: object) => api.post('/wallets', data),
   get: (id: string) => api.get(`/wallets/${id}`),
   ledger: (id: string, params?: object) => api.get(`/wallets/${id}/ledger`, { params }),

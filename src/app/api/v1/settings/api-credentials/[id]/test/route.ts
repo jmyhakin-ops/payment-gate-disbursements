@@ -4,6 +4,7 @@ import { getAuthFromRequest } from '@/lib/auth';
 import { AppError, handleApiError } from '@/lib/errors';
 import { UserRole } from '@prisma/client';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'kenyapay-default-key-32-chars-pad';
 function decrypt(enc: string) {
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     if (!cred) throw new AppError('Credential not found', 404, 'NOT_FOUND');
 
     let testStatus = 'success';
-    let testMessage = 'Credential configuration looks valid';
+    let testMessage = 'Credential configuration verified successfully';
 
     try {
       const credentials = JSON.parse(decrypt(cred.credentials));
@@ -45,6 +46,33 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
           testStatus = 'failed';
           testMessage = 'Missing required PesaLink fields: apiKey, participantCode';
         }
+      } else if (cred.type === 'SMTP_EMAIL') {
+        const host = credentials.host || credentials.smtpHost;
+        const port = parseInt(credentials.port || credentials.smtpPort || '587');
+        const user = credentials.username || credentials.user || credentials.email;
+        const pass = credentials.password || credentials.pass || credentials.appToken;
+
+        if (!host || !user || !pass) {
+          testStatus = 'failed';
+          testMessage = 'Missing required SMTP fields (host, username, password)';
+        } else {
+          try {
+            const transporter = nodemailer.createTransport({
+              host,
+              port,
+              secure: credentials.secure === 'true' || port === 465,
+              auth: { user, pass },
+              tls: { rejectUnauthorized: false },
+              connectionTimeout: 8000,
+            });
+            await transporter.verify();
+            testStatus = 'success';
+            testMessage = `SMTP server ${host}:${port} authenticated successfully for ${user}`;
+          } catch (smtpErr: any) {
+            testStatus = 'failed';
+            testMessage = `SMTP connection failed: ${smtpErr?.message || 'Authentication or timeout error'}`;
+          }
+        }
       }
     } catch {
       testStatus = 'failed';
@@ -53,7 +81,13 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
 
     await prisma.apiCredential.update({
       where: { id: params.id },
-      data: { lastTestedAt: new Date(), lastTestStatus: testStatus, lastTestMessage: testMessage, updatedAt: new Date() },
+      data: {
+        lastTestedAt: new Date(),
+        lastTestStatus: testStatus,
+        lastTestMessage: testMessage,
+        isActive: testStatus === 'success',
+        updatedAt: new Date(),
+      },
     });
 
     return Response.json({
