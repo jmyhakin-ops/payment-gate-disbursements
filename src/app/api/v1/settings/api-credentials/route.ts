@@ -28,6 +28,22 @@ function mask(val: string) {
   return val.length > 8 ? val.substring(0, 4) + '****' + val.slice(-4) : '****';
 }
 
+// Fields that should be masked (actual secrets) — everything else shown in plaintext
+const SECRET_KEYS = new Set([
+  'password', 'pass', 'appToken', 'secret', 'consumerSecret', 'apiSecret',
+  'clientSecret', 'initiatorPassword', 'passkey', 'privateKey', 'apiKey',
+  'consumerKey', 'clientId', 'webhookSecret',
+]);
+
+function maskCreds(parsedCreds: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  Object.keys(parsedCreds).forEach((k) => {
+    const isSecret = SECRET_KEYS.has(k) || k.toLowerCase().includes('secret') || k.toLowerCase().includes('password') || k.toLowerCase().includes('key') || k.toLowerCase().includes('token');
+    out[k] = isSecret ? mask(parsedCreds[k]) : parsedCreds[k];
+  });
+  return out;
+}
+
 // GET /api/v1/settings/api-credentials
 export async function GET(request: NextRequest) {
   try {
@@ -50,9 +66,7 @@ export async function GET(request: NextRequest) {
     const masked = creds.map((c) => {
       let parsedCreds: Record<string, string> = {};
       try { parsedCreds = JSON.parse(decrypt(c.credentials)); } catch { parsedCreds = {}; }
-      const maskedCreds: Record<string, string> = {};
-      Object.keys(parsedCreds).forEach((k) => { maskedCreds[k] = mask(parsedCreds[k]); });
-      return { ...c, credentials: maskedCreds };
+      return { ...c, credentials: maskCreds(parsedCreds) };
     });
 
     return Response.json({ success: true, data: masked });

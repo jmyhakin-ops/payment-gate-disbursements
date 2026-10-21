@@ -18,6 +18,19 @@ function decrypt(enc: string) {
 function mask(val: string) {
   return val.length > 8 ? val.substring(0, 4) + '****' + val.slice(-4) : '****';
 }
+const SECRET_KEYS = new Set([
+  'password', 'pass', 'appToken', 'secret', 'consumerSecret', 'apiSecret',
+  'clientSecret', 'initiatorPassword', 'passkey', 'privateKey', 'apiKey',
+  'consumerKey', 'clientId', 'webhookSecret',
+]);
+function maskCreds(parsedCreds: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  Object.keys(parsedCreds).forEach((k) => {
+    const isSecret = SECRET_KEYS.has(k) || k.toLowerCase().includes('secret') || k.toLowerCase().includes('password') || k.toLowerCase().includes('key') || k.toLowerCase().includes('token');
+    out[k] = isSecret ? mask(parsedCreds[k]) : parsedCreds[k];
+  });
+  return out;
+}
 
 // Helper: build org-scoped where clause (Super Admin can access any credential)
 function credWhere(id: string, orgId: string | null, isSuperAdmin: boolean) {
@@ -89,9 +102,6 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
 
     let parsedCreds: Record<string, string> = {};
     try { parsedCreds = JSON.parse(decrypt(cred.credentials)); } catch { parsedCreds = {}; }
-    const maskedCreds: Record<string, string> = {};
-    Object.keys(parsedCreds).forEach((k) => { maskedCreds[k] = mask(parsedCreds[k]); });
-
-    return Response.json({ success: true, data: { ...cred, credentials: maskedCreds } });
+    return Response.json({ success: true, data: { ...cred, credentials: maskCreds(parsedCreds) } });
   } catch (err) { return handleApiError(err); }
 }
